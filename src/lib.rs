@@ -219,14 +219,14 @@ pub trait CtOrd: CtEq {
     where
         Self: CtSelect,
     {
-        Self::ct_select(other, self, self.ct_gt(other))
+        Self::ct_select(self.ct_gt(other), self, other)
     }
 
     fn ct_min(&self, other: &Self) -> Self
     where
         Self: CtSelect,
     {
-        Self::ct_select(self, other, self.ct_gt(other))
+        Self::ct_select(self.ct_gt(other), self, other)
     }
 
     fn ct_clamp(&self, min: &Self, max: &Self) -> Self
@@ -318,19 +318,19 @@ macro_rules! impl_int {
     ($t_u:ty, $t_i:ty) => {
         impl CtSelect for $t_u {
             #[inline]
-            fn ct_select(a: &Self, b: &Self, choice: CtBool) -> Self {
-                let mut res = *a;
-                res.cmovnz(b, choice.to_u8());
+            fn ct_select(choice: CtBool, then: &Self, else_: &Self) -> Self {
+                let mut res = *else_;
+                res.cmovnz(then, choice.to_u8());
                 res
             }
         }
 
         impl CtSelect for $t_i {
             #[inline]
-            fn ct_select(a: &Self, b: &Self, choice: CtBool) -> Self {
-                let a = *a as $t_u;
-                let b = *b as $t_u;
-                CtSelect::ct_select(&a, &b, choice) as $t_i
+            fn ct_select(choice: CtBool, then: &Self, else_: &Self) -> Self {
+                let then = *then as $t_u;
+                let else_ = *else_ as $t_u;
+                CtSelect::ct_select(choice, &then, &else_) as $t_i
             }
         }
         impl_int_no_select!($t_u, $t_i);
@@ -348,9 +348,9 @@ impl_int_no_select!(usize, isize);
 // portable fallback
 impl CtSelect for usize {
     #[inline]
-    fn ct_select(a: &Self, b: &Self, choice: CtBool) -> Self {
+    fn ct_select(choice: CtBool, then: &Self, else_: &Self) -> Self {
         let mask = -(choice.to_u8() as isize) as usize;
-        a ^ (mask & (a ^ b))
+        else_ ^ (mask & (else_ ^ then))
     }
 }
 
@@ -358,9 +358,9 @@ impl CtSelect for usize {
 // portable fallback
 impl CtSelect for isize {
     #[inline]
-    fn ct_select(a: &Self, b: &Self, choice: CtBool) -> Self {
+    fn ct_select(choice: CtBool, then: &Self, else_: &Self) -> Self {
         let mask = -(choice.to_u8() as isize);
-        a ^ (mask & (a ^ b))
+        else_ ^ (mask & (else_ ^ then))
     }
 }
 
@@ -369,7 +369,7 @@ impl CtSelect for isize {
 /// Implementors of this trait additionally get a blanket implementation for [`CtSelectExt`] which
 /// provides conditional assignment, swapping, etc.
 pub trait CtSelect: Sized {
-    fn ct_select(a: &Self, b: &Self, choice: CtBool) -> Self;
+    fn ct_select(choice: CtBool, then: &Self, else_: &Self) -> Self;
 }
 
 /// Extension trait for [`CtSelect`] that provides additional utility.
@@ -407,7 +407,7 @@ pub trait CtSelectExt: CtSelect {
     /// ```
     ///
     fn ct_replace_if(&mut self, other: &Self, choice: CtBool) -> Self {
-        core::mem::replace(self, Self::ct_select(self, other, choice))
+        core::mem::replace(self, Self::ct_select(choice, other, self))
     }
 
     /// Conditionally swaps `other` with `self`
@@ -473,26 +473,16 @@ pub trait CtSelectExt: CtSelect {
     {
         self.ct_replace_if(&Self::default(), choice)
     }
-
-    #[inline]
-    fn ct_branch<FThen, FElse, U>(cond: CtBool, then: FThen, else_: FElse) -> U
-    where
-        FThen: FnOnce() -> U,
-        FElse: FnOnce() -> U,
-        U: CtSelect,
-    {
-        CtSelect::ct_select(&then(), &else_(), cond)
-    }
 }
 
 impl<T: CtSelect> CtSelectExt for T {}
 
 impl CtSelect for core::cmp::Ordering {
     #[inline]
-    fn ct_select(a: &Self, b: &Self, choice: CtBool) -> Self {
-        let a = *a as i8;
-        let b = *b as i8;
-        let res = i8::ct_select(&a, &b, choice);
+    fn ct_select(choice: CtBool, then: &Self, else_: &Self) -> Self {
+        let then = *then as i8;
+        let else_ = *else_ as i8;
+        let res = i8::ct_select(choice, &then, &else_);
 
         // # SAFETY: res is guaranteed to be in {-1, 0, 1} because it is either a or b which were
         // originally orderings
@@ -502,9 +492,9 @@ impl CtSelect for core::cmp::Ordering {
 
 impl<T: CtSelect, const N: usize> CtSelect for [T; N] {
     #[inline]
-    fn ct_select(a: &[T; N], b: &[T; N], choice: CtBool) -> Self {
-        util::arr_zip(a, b, |a_elem, b_elem| {
-            CtSelect::ct_select(a_elem, b_elem, choice)
+    fn ct_select(choice: CtBool, then: &[T; N], else_: &[T; N]) -> Self {
+        util::arr_zip(then, else_, |t_elem, e_elem| {
+            CtSelect::ct_select(choice, t_elem, e_elem)
         })
     }
 }
@@ -705,7 +695,7 @@ impl<T> CtOption<T> {
     where
         T: CtSelect,
     {
-        T::ct_select(&def, &self.value, self.is_some)
+        T::ct_select(self.is_some, &self.value, &def)
     }
 
     /// Returns the contained `Some` value or a default.

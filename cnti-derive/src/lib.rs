@@ -77,17 +77,30 @@ fn prepare_struct(
     Ok((name, input.generics, info))
 }
 
+fn crate_ident() -> proc_macro2::TokenStream {
+    let crate_name = proc_macro_crate::crate_name("cnti").expect("cnti is in Cargo.toml");
+    match crate_name {
+        proc_macro_crate::FoundCrate::Itself => quote!(crate),
+        proc_macro_crate::FoundCrate::Name(name) => {
+            let ident = syn::Ident::new(&name, Span::call_site());
+            quote!(#ident)
+        }
+    }
+}
+
 #[proc_macro_derive(CtPartialEq)]
 pub fn derive_ct_partial_eq(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    let (name, generics, info) = match prepare_struct(input, syn::parse_quote!(CtPartialEq)) {
-        Ok(v) => v,
-        Err(ts) => return ts,
-    };
+    let crate_prefix = crate_ident();
+    let (name, generics, info) =
+        match prepare_struct(input, syn::parse_quote!(#crate_prefix::CtPartialEq)) {
+            Ok(v) => v,
+            Err(ts) => return ts,
+        };
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
     let body = if info.fields.is_empty() {
-        quote!(CtBool::TRUE)
+        quote!(#crate_prefix::CtBool::TRUE)
     } else {
         let comparisons = info
             .fields
@@ -99,8 +112,9 @@ pub fn derive_ct_partial_eq(input: TokenStream) -> TokenStream {
     };
 
     quote! {
-        impl #impl_generics CtPartialEq for #name #ty_generics #where_clause {
+        impl #impl_generics #crate_prefix::CtPartialEq for #name #ty_generics #where_clause {
             fn ct_eq(&self, other: &Self) -> CtBool {
+                use #crate_prefix::CtPartialEq as _;
                 #body
             }
         }
@@ -110,32 +124,33 @@ pub fn derive_ct_partial_eq(input: TokenStream) -> TokenStream {
 
 #[proc_macro_derive(CtSelect)]
 pub fn derive_ct_select(input: TokenStream) -> TokenStream {
+    let crate_prefix = crate_ident();
     let input = parse_macro_input!(input as DeriveInput);
-    let (name, generics, info) = match prepare_struct(input, syn::parse_quote!(CtSelect)) {
-        Ok(v) => v,
-        Err(ts) => return ts,
-    };
+    let (name, generics, info) =
+        match prepare_struct(input, syn::parse_quote!(#crate_prefix::CtSelect)) {
+            Ok(v) => v,
+            Err(ts) => return ts,
+        };
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
     let body = if info.fields.is_empty() {
         quote!(Self)
     } else if info.named {
-        let assigns = info
-            .fields
-            .iter()
-            .map(|id| quote!(#id: CtSelect::ct_select(&a.#id, &b.#id, choice)));
+        let assigns = info.fields.iter().map(
+            |id| quote!(#id: #crate_prefix::CtSelect::ct_select(choice, &then.#id, &else_.#id)),
+        );
         quote!(Self { #(#assigns),* })
     } else {
         let assigns = info
             .fields
             .iter()
-            .map(|idx| quote!(CtSelect::ct_select(&a.#idx, &b.#idx, choice)));
+            .map(|idx| quote!(#crate_prefix::CtSelect::ct_select(choice, &then.#idx, &else_.#idx)));
         quote!(Self( #(#assigns),* ))
     };
 
     quote! {
-        impl #impl_generics CtSelect for #name #ty_generics #where_clause {
-            fn ct_select(a: &Self, b: &Self, choice: CtBool) -> Self {
+        impl #impl_generics #crate_prefix::CtSelect for #name #ty_generics #where_clause {
+            fn ct_select(choice: #crate_prefix::CtBool, then: &Self, else_: &Self) -> Self {
                 #body
             }
         }
@@ -146,14 +161,16 @@ pub fn derive_ct_select(input: TokenStream) -> TokenStream {
 #[proc_macro_derive(CtEq)]
 pub fn derive_ct_eq(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    let (name, generics, _info) = match prepare_struct(input, syn::parse_quote!(CtEq)) {
-        Ok(v) => v,
-        Err(ts) => return ts,
-    };
+    let crate_prefix = crate_ident();
+    let (name, generics, _info) =
+        match prepare_struct(input, syn::parse_quote!(#crate_prefix::CtEq)) {
+            Ok(v) => v,
+            Err(ts) => return ts,
+        };
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
     quote! {
-        impl #impl_generics CtEq for #name #ty_generics #where_clause {}
+        impl #impl_generics #crate_prefix::CtEq for #name #ty_generics #where_clause {}
     }
     .into()
 }
@@ -161,14 +178,16 @@ pub fn derive_ct_eq(input: TokenStream) -> TokenStream {
 #[proc_macro_derive(CtOrd)]
 pub fn derive_ct_ord(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    let (name, generics, info) = match prepare_struct(input, syn::parse_quote!(CtOrd)) {
-        Ok(v) => v,
-        Err(ts) => return ts,
-    };
+    let crate_prefix = crate_ident();
+    let (name, generics, info) =
+        match prepare_struct(input, syn::parse_quote!(#crate_prefix::CtOrd)) {
+            Ok(v) => v,
+            Err(ts) => return ts,
+        };
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
     let body = match info.fields.len() {
-        0 => quote! {CtBool::FALSE},
+        0 => quote! {#crate_prefix::CtBool::FALSE},
         1 => {
             let field = info.fields.into_iter().next().unwrap();
             quote! {self.#field.ct_gt(&other.#field)}
@@ -207,8 +226,10 @@ pub fn derive_ct_ord(input: TokenStream) -> TokenStream {
     };
 
     quote! {
-        impl #impl_generics CtOrd for #name #ty_generics #where_clause {
+        impl #impl_generics #crate_prefix::CtOrd for #name #ty_generics #where_clause {
             fn ct_gt(&self, other: &Self) -> CtBool {
+                use #crate_prefix::CtOrd as _;
+                use #crate_prefix::CtPartialEq as _;
                 #body
             }
         }
