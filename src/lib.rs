@@ -44,7 +44,7 @@ impl<T> BlackBox<T> {
     }
 }
 
-#[derive(Copy, Clone, Default, CtEq, CtOrd, CtSelect)]
+#[derive(Copy, Clone, Default, CtEq, CtSelect)]
 #[repr(transparent)]
 /// The CtBool struct represents a boolean that is used for "branching" in branchless,
 /// constant-time programs
@@ -76,6 +76,12 @@ pub struct CtBool(BlackBox<u8>);
 impl core::fmt::Debug for CtBool {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "CtBool")
+    }
+}
+
+impl CtOrd for CtBool {
+    fn ct_gt(&self, other: &Self) -> CtBool {
+        *self & !*other
     }
 }
 
@@ -295,21 +301,18 @@ macro_rules! impl_int_no_select {
         impl CtEq for $t_i {}
 
         impl CtOrd for $t_i {
+            #[inline]
             fn ct_gt(&self, other: &Self) -> CtBool {
                 let self_shift = *self >> (<$t_i>::BITS - 1);
-                let self_sign = self_shift & 1;
+                let self_sign = CtBool::from_u8((self_shift & 1) as u8);
                 let self_abs = ((*self ^ self_shift) - self_shift) as $t_u;
 
                 let other_shift = *other >> (<$t_i>::BITS - 1);
-                let other_sign = other_shift & 1;
+                let other_sign = CtBool::from_u8((other_shift & 1) as u8);
                 let other_abs = ((*other ^ other_shift) - other_shift) as $t_u;
 
-                let self_is_neg = CtBool::from_u8(self_sign as u8);
-                let other_is_neg = CtBool::from_u8(other_sign as u8);
-
-                let sign_diff = self_is_neg ^ other_is_neg;
-
-                (!self_is_neg & other_is_neg) | (self_abs.ct_gt(&other_abs) & !sign_diff)
+                other_sign.ct_gt(&self_sign)
+                    | (other_sign.ct_eq(&self_sign) & self_abs.ct_gt(&other_abs))
             }
         }
     };
