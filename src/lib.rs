@@ -80,6 +80,7 @@ impl core::fmt::Debug for CtBool {
 }
 
 impl CtOrd for CtBool {
+    #[inline]
     fn ct_gt(&self, other: &Self) -> CtBool {
         *self & !*other
     }
@@ -172,6 +173,8 @@ impl Not for CtBool {
 
 pub trait CtPartialEq {
     fn ct_eq(&self, other: &Self) -> CtBool;
+
+    #[inline]
     fn ct_neq(&self, other: &Self) -> CtBool {
         !self.ct_eq(other)
     }
@@ -189,18 +192,22 @@ impl<const N: usize, T: CtPartialEq> CtPartialEq for [T; N] {
 impl<const N: usize, T: CtEq> CtEq for [T; N] {}
 
 impl<const N: usize, T: CtOrd> CtOrd for [T; N] {
+    #[inline]
     fn ct_gt(&self, other: &Self) -> CtBool {
         util::ct_all(self, other, CtOrd::ct_gt)
     }
 
+    #[inline]
     fn ct_lt(&self, other: &Self) -> CtBool {
         util::ct_all(self, other, CtOrd::ct_lt)
     }
 
+    #[inline]
     fn ct_leq(&self, other: &Self) -> CtBool {
         util::ct_all(self, other, CtOrd::ct_leq)
     }
 
+    #[inline]
     fn ct_geq(&self, other: &Self) -> CtBool {
         util::ct_all(self, other, CtOrd::ct_geq)
     }
@@ -209,18 +216,22 @@ impl<const N: usize, T: CtOrd> CtOrd for [T; N] {
 pub trait CtOrd: CtEq {
     fn ct_gt(&self, other: &Self) -> CtBool;
 
+    #[inline]
     fn ct_leq(&self, other: &Self) -> CtBool {
         !self.ct_gt(other)
     }
 
+    #[inline]
     fn ct_lt(&self, other: &Self) -> CtBool {
         other.ct_gt(self)
     }
 
+    #[inline]
     fn ct_geq(&self, other: &Self) -> CtBool {
         !self.ct_lt(other)
     }
 
+    #[inline]
     fn ct_max(&self, other: &Self) -> Self
     where
         Self: CtSelect,
@@ -228,6 +239,7 @@ pub trait CtOrd: CtEq {
         Self::ct_select(self.ct_gt(other), self, other)
     }
 
+    #[inline]
     fn ct_min(&self, other: &Self) -> Self
     where
         Self: CtSelect,
@@ -235,6 +247,7 @@ pub trait CtOrd: CtEq {
         Self::ct_select(self.ct_gt(other), self, other)
     }
 
+    #[inline]
     fn ct_clamp(&self, min: &Self, max: &Self) -> Self
     where
         Self: CtSelect,
