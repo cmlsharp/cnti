@@ -9,25 +9,14 @@ use core::ops::{
     BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Deref, DerefMut, Not,
 };
 
-#[derive(Copy, Clone, Default, CtEq, CtOrd)]
 #[repr(transparent)]
-pub struct CtBool(BlackBox<u8>);
-
-impl core::fmt::Debug for CtBool {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "CtBool")
-    }
-}
-
-impl CtPartialEq for CtBool {
-    #[inline]
-    fn ct_eq(&self, rhs: &CtBool) -> CtBool {
-        !(*self ^ *rhs)
-    }
-}
-
-#[repr(transparent)]
-#[derive(Clone, Copy, Default, CtEq, CtPartialEq, CtOrd)]
+// is deriving this fine, or should i manually impl so pulling stuff out of blackbox goes through
+// expose?
+#[derive(Clone, Copy, Default, CtEq, CtPartialEq, CtOrd, CtSelect)]
+/// Puts T behind a core::hint::black_box optimization barrier.
+/// Note that this is just a best effort attempt to prevent LLVM from making
+/// non-constant-time optimizations wrt T. The compiler is technically free to ignore this.
+/// Assembly should always be manually verified.
 pub struct BlackBox<T>(T);
 
 impl<T> core::fmt::Debug for BlackBox<T> {
@@ -52,6 +41,48 @@ impl<T> BlackBox<T> {
         T: Copy,
     {
         hint::black_box(self.0)
+    }
+}
+
+#[derive(Copy, Clone, Default, CtEq, CtOrd, CtSelect)]
+#[repr(transparent)]
+/// The CtBool struct represents a boolean that is used for "branching" in branchless,
+/// constant-time programs
+///
+/// It aims to prevent LLVM from using its knowledge of the fact that a bool is either `0` or `1`
+/// to re-insert branches in otherwise branchless code. Constructing a CtBool from
+/// `CtBool::protect(my_boolean)` passes the boolean through an optimization barrier that is a
+/// best-effort attempt to prevent such optimizations. It is very similar to
+/// [`subtle::Choice`](https://docs.rs/subtle/2.6.1/subtle/struct.Choice.html).
+///
+/// # Example usage:
+///
+/// ```no_run
+/// use cnti::{CtBool, CtPartialEq, CtSelect, CtSelectExt};
+/// # let a: u8 = 12;
+/// # let b = 13;
+/// # let mut c = 15;
+///
+///
+/// // equal is a CtBool
+/// let a_equal_b = a.ct_eq(&b);
+///
+/// // set c to 0 if  a == b
+/// c.ct_replace_if(&0, a_equal_b);
+///
+/// ```
+pub struct CtBool(BlackBox<u8>);
+
+impl core::fmt::Debug for CtBool {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "CtBool")
+    }
+}
+
+impl CtPartialEq for CtBool {
+    #[inline]
+    fn ct_eq(&self, rhs: &CtBool) -> CtBool {
+        !(*self ^ *rhs)
     }
 }
 
@@ -168,44 +199,6 @@ impl<const N: usize, T: CtOrd> CtOrd for [T; N] {
         util::ct_all(self, other, CtOrd::ct_geq)
     }
 }
-
-/*
-#[derive(Copy, Clone)]
-// I'm not actually sure if BlackBox<i8> is necessary as opposed to just wrapping Ordering
-// or a regular i8 directly. I'm unable to create examples where it matters, but might as well do
-// it to be safe.
-pub struct CtOrdering(BlackBox<i8>);
-
-impl CtOrdering {
-    pub const LESS: CtOrdering = CtOrdering::protect(core::cmp::Ordering::Less);
-    pub const EQUAL: CtOrdering = CtOrdering::protect(core::cmp::Ordering::Equal);
-    pub const GREATER: CtOrdering = CtOrdering::protect(core::cmp::Ordering::Greater);
-    #[inline]
-    pub const fn expose(self) -> core::cmp::Ordering {
-        match self.to_i8() {
-            -1 => core::cmp::Ordering::Less,
-            0 => core::cmp::Ordering::Equal,
-            1 => core::cmp::Ordering::Greater,
-            _ => panic!("invalid value for CtOrdering"),
-        }
-    }
-    #[inline]
-    pub const fn protect(inner: core::cmp::Ordering) -> Self {
-        Self::from_i8(inner as i8)
-    }
-
-    #[inline]
-    const fn to_i8(self) -> i8 {
-        self.0.expose_const()
-    }
-
-    #[inline]
-    pub const fn from_i8(inner: i8) -> Self {
-        debug_assert!(inner == -1 || inner == 0 || inner == 1);
-        Self(BlackBox::protect(inner))
-    }
-}
-*/
 
 pub trait CtOrd: CtEq {
     fn ct_gt(&self, other: &Self) -> CtBool;
@@ -480,6 +473,16 @@ pub trait CtSelectExt: CtSelect {
     {
         self.ct_replace_if(&Self::default(), choice)
     }
+
+    #[inline]
+    fn ct_branch<FThen, FElse, U>(cond: CtBool, then: FThen, else_: FElse) -> U
+    where
+        FThen: FnOnce() -> U,
+        FElse: FnOnce() -> U,
+        U: CtSelect,
+    {
+        CtSelect::ct_select(&then(), &else_(), cond)
+    }
 }
 
 impl<T: CtSelect> CtSelectExt for T {}
@@ -494,13 +497,6 @@ impl CtSelect for core::cmp::Ordering {
         // # SAFETY: res is guaranteed to be in {-1, 0, 1} because it is either a or b which were
         // originally orderings
         unsafe { util::i8_to_ordering(res) }
-    }
-}
-
-impl CtSelect for CtBool {
-    #[inline]
-    fn ct_select(a: &Self, b: &Self, choice: CtBool) -> Self {
-        CtBool::from_u8(CtSelect::ct_select(&a.to_u8(), &b.to_u8(), choice))
     }
 }
 
