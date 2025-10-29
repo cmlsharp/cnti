@@ -296,19 +296,20 @@ macro_rules! impl_int_no_select {
 
         impl CtOrd for $t_i {
             fn ct_gt(&self, other: &Self) -> CtBool {
-                let unsigned_self = *self as $t_u;
-                let unsigned_other = *other as $t_u;
-                let abs_self = unsigned_self & ((<$t_u>::MAX - 1) >> 1);
-                let abs_other = unsigned_other & ((<$t_u>::MAX - 1) >> 1);
+                let self_shift = *self >> (<$t_i>::BITS - 1);
+                let self_sign = self_shift & 1;
+                let self_abs = ((*self ^ self_shift) - self_shift) as $t_u;
 
-                let self_is_neg =
-                    CtBool::from_u8(((unsigned_self >> (<$t_u>::BITS - 1)) & 1) as u8);
-                let other_is_neg =
-                    CtBool::from_u8(((unsigned_other >> (<$t_u>::BITS - 1)) & 1) as u8);
+                let other_shift = *other >> (<$t_i>::BITS - 1);
+                let other_sign = other_shift & 1;
+                let other_abs = ((*other ^ other_shift) - other_shift) as $t_u;
+
+                let self_is_neg = CtBool::from_u8(self_sign as u8);
+                let other_is_neg = CtBool::from_u8(other_sign as u8);
 
                 let sign_diff = self_is_neg ^ other_is_neg;
 
-                (!self_is_neg & other_is_neg) | (abs_self.ct_gt(&abs_other) & !sign_diff)
+                (!self_is_neg & other_is_neg) | (self_abs.ct_gt(&other_abs) & !sign_diff)
             }
         }
     };
