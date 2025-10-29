@@ -1,0 +1,12 @@
+[package]
+name = "cnti"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+cmov = "0.4.0"
+cnti-derive = {path = "./cnti-derive"}
+
+[workspace]
+resolver = "3"
+members = [".", "cnti-derive"]
