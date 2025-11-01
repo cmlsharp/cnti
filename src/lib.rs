@@ -68,16 +68,24 @@ impl CtBool {
     pub const FALSE: CtBool = CtBool::protect(false);
 
     #[inline]
-    pub const fn protect(b: bool) -> Self {
-        CtBool::from_u8(b as u8)
+    /// Hides `input` boolean in an attempt
+    pub const fn protect(input: bool) -> Self {
+        CtBool::from_u8(input as u8)
     }
 
     #[inline]
+    /// Reveals the underlying boolean, removing any timing protections.
+    /// This should generally be performed only once the value is safe to reveal
     pub const fn expose(self) -> bool {
         self.to_u8() != 0
     }
 
     #[inline]
+    /// Yields the underlying u8 (which is guaranteed to be either 0 or 1, though the optimizer
+    /// should be unaware of this fact)
+    ///
+    /// Library users should nonetheless be careful with how they use this value if they choose to
+    /// expose it.
     pub const fn to_u8(self) -> u8 {
         self.0.expose_const()
     }
@@ -243,7 +251,7 @@ macro_rules! impl_int_no_select {
                 let y = (x | x.wrapping_neg()) >> (<$t_u>::BITS - 1);
 
                 // Result is the opposite of the high bit (now shifted to low).
-                CtBool::from_u8(((y ^ (1 as $t_u)) as u8))
+                CtBool::from_u8((y ^ 1) as u8)
             }
         }
 
@@ -258,7 +266,6 @@ macro_rules! impl_int_no_select {
         }
 
         impl CtOrd for $t_u {
-            #[inline]
             fn ct_gt(&self, other: &$t_u) -> CtBool {
                 let gtb = self & !other; // All the bits in self that are greater than their corresponding bits in other.
                 let mut ltb = !self & other; // All the bits in self that are less than their corresponding bits in other.
@@ -285,7 +292,6 @@ macro_rules! impl_int_no_select {
         impl CtEq for $t_i {}
 
         impl CtOrd for $t_i {
-            #[inline]
             fn ct_gt(&self, other: &Self) -> CtBool {
                 let self_shift = *self >> (<$t_i>::BITS - 1);
                 let self_sign = CtBool::from_u8((self_shift & 1) as u8);
@@ -353,6 +359,7 @@ impl CtSelect for isize {
 }
 
 /// Constant time selection based on a [`CtBool`].
+///
 ///
 /// Implementors of this trait additionally get a blanket implementation for [`CtSelectExt`] which
 /// provides conditional assignment, swapping, etc.
@@ -481,7 +488,7 @@ impl CtSelect for core::cmp::Ordering {
 impl<T: CtSelect, const N: usize> CtSelect for [T; N] {
     #[inline]
     fn ct_select(choice: CtBool, then: &[T; N], else_: &[T; N]) -> Self {
-        util::arr_zip(then, else_, |t_elem, e_elem| {
+        util::arr_combine(then, else_, |t_elem, e_elem| {
             CtSelect::ct_select(choice, t_elem, e_elem)
         })
     }
@@ -595,19 +602,14 @@ mod util {
 
     // Takes two arrays of size n and produces a new array of size n whose ith element is f(lhs[i],
     // rhs[i])
-    pub(crate) fn arr_zip<T, const N: usize, U>(
+    pub(crate) fn arr_combine<T, const N: usize, U>(
         lhs: &[T; N],
         rhs: &[T; N],
         f: impl Fn(&T, &T) -> U,
     ) -> [U; N] {
-        core::array::from_fn(|i| {
-            // # SAFETY: core::array::from_fn guarantees that i will be in the range [0, N) and lhs and
-            // rhs are both of array length N
-            // Hence we use get_unchecked to remove the unnecessary bounds checking
-            let l = unsafe { lhs.get_unchecked(i) };
-            let r = unsafe { rhs.get_unchecked(i) };
-            f(l, r)
-        })
+        // compiler is smart enough to get rid of bounds checks here!
+        // maybe can just get rid of this function
+        core::array::from_fn(|i| f(&lhs[i], &rhs[i]))
     }
 
     // # SAFETY: x must be in {-1, 0, 1}
@@ -619,4 +621,59 @@ mod util {
         // range {-1, 0, 1}. Per the safety contract of this function, x in {-1, 0, 1}
         unsafe { *res_ptr }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use paste::paste;
+    use quickcheck_macros::quickcheck;
+
+    #[test]
+    fn slices_equal() {
+        let a: [u8; 8] = [0, 1, 2, 3, 4, 5, 6, 7];
+        let b = a;
+        assert!(a.ct_eq(&b).expose());
+        let c = [0; _];
+        assert!(!a.ct_eq(&c).expose())
+    }
+
+    macro_rules! test_ct_select {
+        ($($t:path),*) => {
+            $(paste! {
+                #[quickcheck]
+                fn [<test_ct_select_$t>](select: bool, a: $t, b: $t) {
+                    assert_eq!(
+                        CtSelect::ct_select(CtBool::protect(select), &a, &b),
+                        if select { a } else { b }
+                    );
+                }
+
+            })*
+        };
+    }
+
+    macro_rules! test_ct_equal {
+        ($($t:path),*) => {
+            $(paste! {
+                #[quickcheck]
+                fn [<test_ct_eq_$t>](a: $t, b: $t) {
+                    assert_eq!(
+                        a.ct_eq(&b).expose(),
+                        a == b
+                    );
+                }
+
+            })*
+        };
+    }
+
+    // this is probably overkill since these are all generated from the same macro
+    // on the other hand the tests are cheap to write so...?
+    test_ct_select!(
+        i8, u8, i16, u16, i32, u32, i64, u64, i128, u128, isize, usize
+    );
+    test_ct_equal!(
+        i8, u8, i16, u16, i32, u32, i64, u64, i128, u128, isize, usize
+    );
 }

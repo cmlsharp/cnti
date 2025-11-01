@@ -10,3 +10,8 @@ cnti-derive = {path = "./cnti-derive"}
 [workspace]
 resolver = "3"
 members = [".", "cnti-derive"]
+
+[dev-dependencies]
+paste = "1.0.15"
+quickcheck = "1.0.3"
+quickcheck_macros = "1.1.0"
