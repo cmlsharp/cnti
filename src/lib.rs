@@ -1,4 +1,4 @@
-#![no_std]
+#![cfg_attr(not(test), no_std)]
 
 use core::ops::{
     BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Deref, DerefMut, Not,
@@ -64,14 +64,8 @@ impl CtPartialEq for CtBool {
 }
 
 impl CtBool {
-    pub const TRUE: CtBool = CtBool::protect(true);
-    pub const FALSE: CtBool = CtBool::protect(false);
-
-    #[inline]
-    /// Hides `input` boolean in an attempt
-    pub const fn protect(input: bool) -> Self {
-        CtBool::from_u8(input as u8)
-    }
+    pub const TRUE: CtBool = CtBool(BlackBox::protect(true as u8));
+    pub const FALSE: CtBool = CtBool(BlackBox::protect(false as u8));
 
     #[inline]
     /// Reveals the underlying boolean, removing any timing protections.
@@ -267,25 +261,32 @@ macro_rules! impl_int_no_select {
 
         impl CtOrd for $t_u {
             fn ct_gt(&self, other: &$t_u) -> CtBool {
-                let gtb = self & !other; // All the bits in self that are greater than their corresponding bits in other.
-                let mut ltb = !self & other; // All the bits in self that are less than their corresponding bits in other.
-                let mut pow = 1;
+                let a = *self;
+                let b = *other;
+                let diff = b.wrapping_sub(a);
+                let res = (((!b) & a) | ((!(a ^ b)) & diff)) >> (<$t_u>::BITS - 1);
+                CtBool::from_u8(res as u8)
 
-                // Less-than operator is okay here because it's dependent on the bit-width.
-                while pow < <$t_u>::BITS {
-                    ltb |= ltb >> pow; // Bit-smear the highest set bit to the right.
-                    pow += pow;
-                }
-                let mut bit = gtb & !ltb; // Select the highest set bit.
-                let mut pow = 1;
+                //CtBool::from_u8(((*self).wrapping_sub(*other) >> (<$t_u>::BITS - 1)) as u8)
+                //let gtb = self & !other; // All the bits in self that are greater than their corresponding bits in other.
+                //let mut ltb = !self & other; // All the bits in self that are less than their corresponding bits in other.
+                //let mut pow = 1;
 
-                while pow < <$t_u>::BITS {
-                    bit |= bit >> pow; // Shift it to the right until we end up with either 0 or 1.
-                    pow += pow;
-                }
-                // XXX We should possibly do the above flattening to 0 or 1 in the
-                //     Choice constructor rather than making it a debug error?
-                CtBool::from_u8((bit & 1) as u8)
+                //// Less-than operator is okay here because it's dependent on the bit-width.
+                //while pow < <$t_u>::BITS {
+                //    ltb |= ltb >> pow; // Bit-smear the highest set bit to the right.
+                //    pow += pow;
+                //}
+                //let mut bit = gtb & !ltb; // Select the highest set bit.
+                //let mut pow = 1;
+
+                //while pow < <$t_u>::BITS {
+                //    bit |= bit >> pow; // Shift it to the right until we end up with either 0 or 1.
+                //    pow += pow;
+                //}
+                //// XXX We should possibly do the above flattening to 0 or 1 in the
+                ////     Choice constructor rather than making it a debug error?
+                //CtBool::from_u8((bit & 1) as u8)
             }
         }
 
@@ -293,16 +294,20 @@ macro_rules! impl_int_no_select {
 
         impl CtOrd for $t_i {
             fn ct_gt(&self, other: &Self) -> CtBool {
-                let self_shift = *self >> (<$t_i>::BITS - 1);
-                let self_sign = CtBool::from_u8((self_shift & 1) as u8);
-                let self_abs = ((*self ^ self_shift) - self_shift) as $t_u;
-
-                let other_shift = *other >> (<$t_i>::BITS - 1);
-                let other_sign = CtBool::from_u8((other_shift & 1) as u8);
-                let other_abs = ((*other ^ other_shift) - other_shift) as $t_u;
-
-                other_sign.ct_gt(&self_sign)
-                    | (other_sign.ct_eq(&self_sign) & self_abs.ct_gt(&other_abs))
+                let sign_mask = 1 << (<$t_i>::BITS - 1);
+                let a = (*self as $t_u) ^ sign_mask;
+                let b = (*other as $t_u) ^ sign_mask;
+                a.ct_gt(&b)
+                //let lt_unsigned = CtBool::from_u8(
+                //    (((self_abs
+                //        ^ ((self_abs ^ other_abs)
+                //            | ((self_abs.wrapping_sub(other_abs)) ^ other_abs)))
+                //        >> (<$t_u>::BITS - 1))
+                //        & 1) as u8,
+                //);
+                //let sign_diff = self_sign ^ other_sign;
+                //let flip = CtSelect::ct_select(sign_self, sign_diff, !sign_diff);
+                //CtSelect::ct_select(other_sign ^ self_sign, &!self_sign, &self_abs.unsigned_g)
             }
         }
     };
@@ -505,6 +510,24 @@ impl<T: CtSelect, const N: usize> CtSelect for [T; N] {
 #[repr(transparent)]
 pub struct PublicLenSlice<T>(pub [T]);
 
+impl<T> PublicLenSlice<T> {
+    pub fn from_slice(slice: &[T]) -> &Self {
+        // # SAFETY:
+        // This is safe because #[repr(transparent)]
+        let ptr = slice as *const [T] as *const _;
+
+        unsafe { &*ptr }
+    }
+
+    pub fn from_mut_slice(slice: &mut [T]) -> &mut Self {
+        // # SAFETY:
+        // This is safe because #[repr(transparent)]
+        let ptr = slice as *mut [T] as *mut _;
+
+        unsafe { &mut *ptr }
+    }
+}
+
 impl<T> core::fmt::Debug for &PublicLenSlice<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "PublicLenSlice")
@@ -513,20 +536,13 @@ impl<T> core::fmt::Debug for &PublicLenSlice<T> {
 
 impl<'a, T> From<&'a [T]> for &'a PublicLenSlice<T> {
     fn from(value: &'a [T]) -> Self {
-        // # SAFETY:
-        // This is safe because #[repr(transparent)]
-        let ptr = value as *const [T] as *const PublicLenSlice<T>;
-
-        unsafe { &*ptr }
+        PublicLenSlice::from_slice(value)
     }
 }
 
 impl<'a, T> From<&'a mut [T]> for &'a mut PublicLenSlice<T> {
     fn from(value: &'a mut [T]) -> Self {
-        // # SAFETY:
-        // This is safe because #[repr(transparent)]
-        let ptr = value as *mut [T] as *mut PublicLenSlice<T>;
-        unsafe { &mut *ptr }
+        PublicLenSlice::from_mut_slice(value)
     }
 }
 
@@ -629,22 +645,13 @@ mod tests {
     use paste::paste;
     use quickcheck_macros::quickcheck;
 
-    #[test]
-    fn slices_equal() {
-        let a: [u8; 8] = [0, 1, 2, 3, 4, 5, 6, 7];
-        let b = a;
-        assert!(a.ct_eq(&b).expose());
-        let c = [0; _];
-        assert!(!a.ct_eq(&c).expose())
-    }
-
     macro_rules! test_ct_select {
         ($($t:path),*) => {
             $(paste! {
                 #[quickcheck]
                 fn [<test_ct_select_$t>](select: bool, a: $t, b: $t) {
                     assert_eq!(
-                        CtSelect::ct_select(CtBool::protect(select), &a, &b),
+                        CtSelect::ct_select(CtBool(BlackBox::protect(select as u8)), &a, &b),
                         if select { a } else { b }
                     );
                 }
@@ -653,27 +660,52 @@ mod tests {
         };
     }
 
+    extern crate std;
+
     macro_rules! test_ct_equal {
         ($($t:path),*) => {
             $(paste! {
                 #[quickcheck]
                 fn [<test_ct_eq_$t>](a: $t, b: $t) {
+                    assert_eq!(a.ct_eq(&a).expose(), true);
                     assert_eq!(
                         a.ct_eq(&b).expose(),
                         a == b
                     );
                 }
 
+
             })*
         };
     }
 
-    // this is probably overkill since these are all generated from the same macro
-    // on the other hand the tests are cheap to write so...?
+    macro_rules! test_ct_ord {
+        ($($t:path),*) => {
+            $(paste! {
+                #[quickcheck]
+                fn [<test_ct_ord_$t>](a: $t, b: $t) {
+                    println!("{a}, {b}");
+                    assert_eq!(a.ct_gt(&b).expose(), a > b, "{a} > {b}");
+                    assert_eq!(a.ct_lt(&b).expose(), a < b, "{a} < {b}");
+                    assert_eq!(a.ct_leq(&b).expose(), a <= b, "{a} <= {b}");
+                    assert_eq!(a.ct_geq(&b).expose(), a >= b, "{a} >= {b}");
+
+                    let inc_a = a.wrapping_add(1);
+                    assert_eq!(a.ct_gt(&inc_a).expose(), a > inc_a);
+                    assert_eq!(a.ct_lt(&inc_a).expose(), a < inc_a);
+                    assert_eq!(a.ct_leq(&inc_a).expose(), a <= inc_a);
+                    assert_eq!(a.ct_geq(&inc_a).expose(), a >= inc_a);
+                }
+            })*
+        };
+    }
+
+    // including usize and isize here because they don't use the cmov crate
+    // so their implementation is different
     test_ct_select!(
         i8, u8, i16, u16, i32, u32, i64, u64, i128, u128, isize, usize
     );
-    test_ct_equal!(
-        i8, u8, i16, u16, i32, u32, i64, u64, i128, u128, isize, usize
-    );
+    test_ct_equal!(i8, u8, i16, u16, i32, u32, i64, u64, i128, u128);
+
+    test_ct_ord!(u8, i8, i16, u16, i32, u32, i64, u64, i128, u128);
 }
