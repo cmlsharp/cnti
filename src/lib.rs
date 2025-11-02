@@ -167,9 +167,6 @@ impl<T, const TRUE: bool> CtIf<'_, T, TRUE> {
     }
 }
 
-/// Represents an incomplete [`CtSelect`] expression.
-/// See the documentation for [`CtBool::if_false`].
-
 impl BitAnd for CtBool {
     type Output = CtBool;
     #[inline]
