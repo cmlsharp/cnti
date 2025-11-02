@@ -248,29 +248,29 @@ pub trait CtEq {
 impl<const N: usize, T: CtEq> CtEq for [T; N] {
     #[inline]
     fn ct_eq(&self, rhs: &Self) -> CtBool {
-        util::ct_all(self, rhs, CtEq::ct_eq)
+        util::ct_zip_all(self, rhs, CtEq::ct_eq)
     }
 }
 
 impl<const N: usize, T: CtOrd> CtOrd for [T; N] {
     #[inline]
     fn ct_gt(&self, other: &Self) -> CtBool {
-        util::ct_all(self, other, CtOrd::ct_gt)
+        util::ct_zip_all(self, other, CtOrd::ct_gt)
     }
 
     #[inline]
     fn ct_lt(&self, other: &Self) -> CtBool {
-        util::ct_all(self, other, CtOrd::ct_lt)
+        util::ct_zip_all(self, other, CtOrd::ct_lt)
     }
 
     #[inline]
     fn ct_leq(&self, other: &Self) -> CtBool {
-        util::ct_all(self, other, CtOrd::ct_leq)
+        util::ct_zip_all(self, other, CtOrd::ct_leq)
     }
 
     #[inline]
     fn ct_geq(&self, other: &Self) -> CtBool {
-        util::ct_all(self, other, CtOrd::ct_geq)
+        util::ct_zip_all(self, other, CtOrd::ct_geq)
     }
 }
 
@@ -569,14 +569,11 @@ impl<T: CtSelect, const N: usize> CtSelect for [T; N] {
     }
 }
 
-/// Unlike [T; N], &[T] does not implement [`CtEq`] and [`CtOrd`] because the two
-/// slices being compared might be of different lengths which would leak information about whether
-/// the two operands have identical types.
-///
-/// `&PublicLenSlice<T>` is effectively an alias for `&[T]` that allows users to explicitly opt-in
-/// to this short-circuiting behavior. Note that the [`CtEq`] implementation for this type
-/// still uses [`CtEq::ct_eq`] to compare the lengths. However, if they are not equal, the
-/// implementation will return early.
+/// Unlike [T; N], [T] does not implement [`CtEq`] and [`CtOrd`] because the length is not known at
+/// compile time, and as such the time for these operations are inherently not data-independent.
+/// However, in many cases, the length of a lice is not in fact secret (even if it isn't known at
+/// compile time), and for such cases, one can construct a `PublicLenSlice<T>` which asserts that
+/// operations which leak information about the length are ok.
 #[repr(transparent)]
 pub struct PublicLenSlice<T>(pub [T]);
 
@@ -659,23 +656,21 @@ impl<T: CtEq> CtEq for PublicLenSlice<T> {
         // the point is here i want people to have to explicitly opt in to potential leakage when
         // comparing slices, but we don't actually have to fully leak the length
         // this does leak if one is longer though
-        if self.len().ct_neq(&rhs.len()).expose() {
+        if self.len() != rhs.len() {
             return CtBool::FALSE;
         }
 
-        util::ct_all(self, rhs, CtEq::ct_eq)
+        util::ct_zip_all(self, rhs, CtEq::ct_eq)
     }
 }
 
 impl<T: CtOrd> CtOrd for PublicLenSlice<T> {
     #[inline]
     fn ct_gt(&self, other: &Self) -> CtBool {
-        if self.len().ct_gt(&other.len()).expose() {
-            CtBool::TRUE
-        } else if self.len().ct_lt(&other.len()).expose() {
-            CtBool::FALSE
+        if self.len() == other.len() {
+            util::ct_zip_all(self, other, CtOrd::ct_gt)
         } else {
-            util::ct_all(self, other, CtOrd::ct_gt)
+            CtBool::protect(self.len() > other.len())
         }
     }
 }
@@ -683,7 +678,7 @@ impl<T: CtOrd> CtOrd for PublicLenSlice<T> {
 mod util {
     use super::CtBool;
     // this will leak min(lhs.len(), rhs.len())!
-    pub(crate) fn ct_all<T>(lhs: &[T], rhs: &[T], f: impl Fn(&T, &T) -> CtBool) -> CtBool {
+    pub(crate) fn ct_zip_all<T>(lhs: &[T], rhs: &[T], f: impl Fn(&T, &T) -> CtBool) -> CtBool {
         lhs.iter()
             .zip(rhs)
             .fold(CtBool::TRUE, |acc, (l, r)| acc & f(l, r))
@@ -691,7 +686,7 @@ mod util {
 
     // this will leak min(lhs.len(), rhs.len())
     #[allow(unused)]
-    pub(crate) fn ct_any<T>(lhs: &[T], rhs: &[T], f: impl Fn(&T, &T) -> CtBool) -> CtBool {
+    pub(crate) fn ct_zip_any<T>(lhs: &[T], rhs: &[T], f: impl Fn(&T, &T) -> CtBool) -> CtBool {
         lhs.iter()
             .zip(rhs)
             .fold(CtBool::FALSE, |acc, (l, r)| acc | f(l, r))
