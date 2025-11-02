@@ -64,8 +64,10 @@ impl CtEq for CtBool {
 }
 
 impl CtBool {
-    pub const TRUE: CtBool = CtBool(BlackBox::protect(true as u8));
-    pub const FALSE: CtBool = CtBool(BlackBox::protect(false as u8));
+    // despite calling protect here black_box does not prevent the compiler from knowing these are
+    // true and false respectively
+    pub const TRUE: CtBool = CtBool::protect(true);
+    pub const FALSE: CtBool = CtBool::protect(false);
 
     #[inline]
     pub const fn protect(b: bool) -> Self {
@@ -90,7 +92,8 @@ impl CtBool {
     }
 
     /// Perform a constant time selection via method chain syntax instead of calling
-    /// [`CtSelect::ct_select`].
+    /// [`CtSelect::ct_select`]. No computation is performed until [`CtIf::else_`] is called on the
+    /// returned object.
     ///
     ///
     /// ```
@@ -105,12 +108,14 @@ impl CtBool {
     ///
     /// assert_eq!(result, equivalent)
     /// ```
+    #[inline]
     pub fn if_true<'a, T: CtSelect>(&self, then: &'a T) -> CtIf<'a, T, true> {
         CtIf::<'_, _, true> { cond: *self, then }
     }
 
     /// Perform a constant time selection via method chain syntax instead of calling
-    /// [`CtSelect::ct_select`].
+    /// [`CtSelect::ct_select`]. No computation is performed until [`CtIf::else_`] is called on the
+    /// returned object.
     ///
     ///
     /// ```
@@ -125,6 +130,7 @@ impl CtBool {
     ///
     /// assert_eq!(result, equivalent)
     /// ```
+    #[inline]
     pub fn if_false<'a, T: CtSelect>(&self, then: &'a T) -> CtIf<'a, T, false> {
         CtIf::<'_, _, false> { cond: *self, then }
     }
@@ -132,7 +138,9 @@ impl CtBool {
     #[inline]
     // TODO: Decide whether we want to make this public
     // I'm kinda inclined to say no. If you have a u8, you can always
-    // construct a CtBool via CtSelect::ct_select(my_u8.ct_eq(&0), CtBool::FALSE, CtBool::TRUE)
+    // construct a CtBool via my_u8.ct_neq(&0).if_true(CtBool::TRUE).else_(CtBool::FALSE)
+    // I want a privat einner function for cases where I _know_ the u8 is 1 or 0 (but i want to
+    // hide this from the optimizer).
     const fn protect_u8(inner: u8) -> Self {
         debug_assert!(inner == 0 || inner == 1);
         Self(BlackBox::protect(inner))
@@ -140,7 +148,7 @@ impl CtBool {
 
     // this function should only ever be called when the optimizer should be unable to tell that
     // the u8 must be either 0 or 1
-    const fn from_raw_unchecked(inner: u8) -> Self {
+    const fn from_u8_no_protect(inner: u8) -> Self {
         debug_assert!(inner == 0 || inner == 1);
         Self(BlackBox::from_raw_unchecked(inner))
     }
@@ -148,18 +156,19 @@ impl CtBool {
 
 /// Represents an incomplete [`CtSelect`] expression.
 /// See the documentation for [`CtBool::if_true`]/[`CtBool::if_false`].
-pub struct CtIf<'a, T, const TRUE: bool> {
+pub struct CtIf<'a, T, const IS_TRUE: bool> {
     cond: CtBool,
     then: &'a T,
 }
 
-impl<T, const TRUE: bool> CtIf<'_, T, TRUE> {
+impl<T, const IS_TRUE: bool> CtIf<'_, T, IS_TRUE> {
     /// Perform the `ct_select` by providing the alternative value
     pub fn else_(self, else_: &T) -> T
     where
         T: CtSelect,
     {
-        if TRUE {
+        // this is a compile-time condition, not a runtime branch!
+        if IS_TRUE {
             CtSelect::ct_select(self.cond, self.then, else_)
         } else {
             CtSelect::ct_select(self.cond, else_, self.then)
@@ -170,8 +179,11 @@ impl<T, const TRUE: bool> CtIf<'_, T, TRUE> {
 impl BitAnd for CtBool {
     type Output = CtBool;
     #[inline]
+    /// TODO determine if no_protect is sound on binary ops
+    /// Can bad stuff happen if you include CtBool::TRUE in your binary expression chain?
+    /// I can't seem to make it happen, but more investigation is required
     fn bitand(self, rhs: CtBool) -> CtBool {
-        CtBool::protect_u8(self.to_u8() & rhs.to_u8())
+        CtBool::from_u8_no_protect(self.to_u8() & rhs.to_u8())
     }
 }
 
@@ -186,9 +198,9 @@ impl BitOr for CtBool {
     type Output = CtBool;
     #[inline]
     fn bitor(self, rhs: CtBool) -> CtBool {
-        // raw_unchecked is fine here because the invariant
+        // no_protect is fine here because the invariant
         // of ctbool is that the compiler can't tell if the k
-        CtBool::from_raw_unchecked(self.to_u8() | rhs.to_u8())
+        CtBool::from_u8_no_protect(self.to_u8() | rhs.to_u8())
     }
 }
 
@@ -196,7 +208,7 @@ impl BitXor for CtBool {
     type Output = CtBool;
     #[inline]
     fn bitxor(self, rhs: Self) -> Self::Output {
-        CtBool::from_raw_unchecked(self.to_u8() ^ rhs.to_u8())
+        CtBool::from_u8_no_protect(self.to_u8() ^ rhs.to_u8())
     }
 }
 
@@ -293,7 +305,7 @@ pub trait CtOrd: CtEq {
     where
         Self: CtSelect,
     {
-        self.ct_lt(other).if_true(self).else_(other)
+        self.ct_gt(other).if_false(self).else_(other)
     }
 
     #[inline]
@@ -312,12 +324,16 @@ macro_rules! impl_int_no_select {
     ($t_u:ty, $t_i:ty) => {
         impl CtEq for $t_u {
             #[inline]
+            // I actually don't know if this is any better than
+            // CtBool::protect(*self == *other).
+            // The compiler can tell this is equality, it outputs a cmp instruction on x86
+            // But our other measures still prevent it from outputting branches
             fn ct_eq(&self, other: &$t_u) -> CtBool {
                 // x == 0 if and only if self == other
                 let x = self ^ other;
 
                 // If x == 0, then x and -x are both equal to zero;
-                // otherwise, one or both will have its high bit set.
+                // otherwise, one or both will have its high bit set. respectively
                 let y = (x | x.wrapping_neg()) >> (<$t_u>::BITS - 1);
 
                 // Result is the opposite of the high bit (now shifted to low).
@@ -384,8 +400,9 @@ impl_int!(u64, i64);
 impl_int!(u128, i128);
 impl_int_no_select!(usize, isize);
 
-// these annoyingly don't have implementations in the cmov crate, pending that we just use the
-// portable fallback
+// these annoyingly don't have implementations in the cmov crate, pending that we just cast them to
+// the right width type depending on target_pointer_width. I guess I don't have a case for 16-bit
+// platforms. lol
 #[cfg(target_pointer_width = "64")]
 impl CtSelect for usize {
     #[inline]
