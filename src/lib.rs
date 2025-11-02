@@ -1,3 +1,4 @@
+#![warn(clippy::pedantic)]
 #![cfg_attr(not(test), no_std)]
 
 use core::ops::{
@@ -14,11 +15,11 @@ pub use black_box::BlackBox;
 mod option;
 pub use option::CtOption;
 
-/// The CtBool struct represents a boolean that is used for "branching" in branchless,
+/// The `CtBool` struct represents a boolean that is used for "branching" in branchless,
 /// constant-time programs
 ///
 /// It aims to prevent LLVM from using its knowledge of the fact that a bool is either `0` or `1`
-/// to re-insert branches in otherwise branchless code. Constructing a CtBool from
+/// to re-insert branches in otherwise branchless code. Constructing a `CtBool` from
 /// `CtBool::protect(my_boolean)` passes the boolean through an optimization barrier that is a
 /// best-effort attempt to prevent such optimizations. It is very similar to
 /// [`subtle::Choice`](https://docs.rs/subtle/2.6.1/subtle/struct.Choice.html).
@@ -64,29 +65,50 @@ impl CtEq for CtBool {
 }
 
 impl CtBool {
+    /// A `CtBool` representing the boolean value `true`.
     // despite calling protect here black_box does not prevent the compiler from knowing these are
     // true and false respectively
     pub const TRUE: CtBool = CtBool::protect(true);
+
+    /// A `CtBool` representing the boolean value `false`.
     pub const FALSE: CtBool = CtBool::protect(false);
 
+    /// Creates a `CtBool` from a boolean value, passing it through an optimization barrier
+    /// to prevent the compiler from knowing it is a boolean (restricted to 0 or 1), forcing
+    /// it to treat the value as a general integer instead.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cnti::CtBool;
+    ///
+    /// let ct_true = CtBool::protect(true);
+    /// assert!(ct_true.expose());
+    ///
+    /// let ct_false = CtBool::protect(false);
+    /// assert!(!ct_false.expose());
+    /// ```
     #[inline]
+    #[must_use]
     pub const fn protect(b: bool) -> Self {
         CtBool::protect_u8(b as u8)
     }
 
-    #[inline]
     /// Reveals the underlying boolean, removing any timing protections.
     /// This should generally be performed only once the value is safe to reveal
+    #[inline]
+    #[must_use]
     pub const fn expose(self) -> bool {
         self.to_u8() != 0
     }
 
-    #[inline]
     /// Yields the underlying u8 (which is guaranteed to be either 0 or 1, though the optimizer
     /// should be unaware of this fact)
     ///
     /// Library users should nonetheless be careful with how they use this value if they choose to
     /// expose it.
+    #[inline]
+    #[must_use]
     pub const fn to_u8(self) -> u8 {
         self.0.expose_const()
     }
@@ -178,10 +200,10 @@ impl<T, const IS_TRUE: bool> CtIf<'_, T, IS_TRUE> {
 
 impl BitAnd for CtBool {
     type Output = CtBool;
+    // TODO determine if no protect is sound on binary ops
+    // Can bad stuff happen if you include CtBool::TRUE in your binary expression chain?
+    // I can't seem to make it happen, but more investigation is required
     #[inline]
-    /// TODO determine if no_protect is sound on binary ops
-    /// Can bad stuff happen if you include CtBool::TRUE in your binary expression chain?
-    /// I can't seem to make it happen, but more investigation is required
     fn bitand(self, rhs: CtBool) -> CtBool {
         CtBool::from_u8_no_protect(self.to_u8() & rhs.to_u8())
     }
@@ -215,7 +237,7 @@ impl BitXor for CtBool {
 impl BitXorAssign for CtBool {
     #[inline]
     fn bitxor_assign(&mut self, rhs: Self) {
-        *self = *self ^ rhs
+        *self = *self ^ rhs;
     }
 }
 
@@ -236,9 +258,32 @@ impl Not for CtBool {
     }
 }
 
+/// Constant-time equality comparison.
+///
+/// This trait provides methods for comparing values for equality in constant time,
+/// returning a [`CtBool`] instead of a regular `bool`. The primary use case is in
+/// conjunction with [`CtSelect`] for constant-time conditional operations.
+///
+/// # Examples
+///
+/// ```
+/// use cnti::CtEq;
+///
+/// let a = 42u32;
+/// let b = 42u32;
+/// let c = 100u32;
+///
+/// assert!(a.ct_eq(&b).expose());
+/// assert!(!a.ct_eq(&c).expose());
+/// assert!(a.ct_neq(&c).expose());
+/// ```
 pub trait CtEq {
+    /// Returns a `CtBool` indicating whether `self` equals `other` in constant time.
     fn ct_eq(&self, other: &Self) -> CtBool;
 
+    /// Returns a `CtBool` indicating whether `self` does not equal `other` in constant time.
+    ///
+    /// This is the logical negation of `ct_eq`.
     #[inline]
     fn ct_neq(&self, other: &Self) -> CtBool {
         !self.ct_eq(other)
@@ -255,44 +300,67 @@ impl<const N: usize, T: CtEq> CtEq for [T; N] {
 impl<const N: usize, T: CtOrd> CtOrd for [T; N] {
     #[inline]
     fn ct_gt(&self, other: &Self) -> CtBool {
-        util::ct_zip_all(self, other, CtOrd::ct_gt)
-    }
-
-    #[inline]
-    fn ct_lt(&self, other: &Self) -> CtBool {
-        util::ct_zip_all(self, other, CtOrd::ct_lt)
-    }
-
-    #[inline]
-    fn ct_leq(&self, other: &Self) -> CtBool {
-        util::ct_zip_all(self, other, CtOrd::ct_leq)
-    }
-
-    #[inline]
-    fn ct_geq(&self, other: &Self) -> CtBool {
-        util::ct_zip_all(self, other, CtOrd::ct_geq)
+        util::ct_lexicographic_gt(self, other)
     }
 }
 
+/// Constant-time ordering comparison.
+///
+/// This trait provides methods for comparing values for ordering in constant time,
+/// returning a [`CtBool`] instead of a regular `bool`. The primary use case is in
+/// conjunction with [`CtSelect`] for constant-time conditional operations.
+///
+/// # Examples
+///
+/// ```
+/// use cnti::CtOrd;
+///
+/// let a = 10u32;
+/// let b = 20u32;
+///
+/// assert!(a.ct_lt(&b).expose());
+/// assert!(b.ct_gt(&a).expose());
+/// assert!(a.ct_leq(&b).expose());
+/// assert!(b.ct_geq(&a).expose());
+/// ```
 pub trait CtOrd: CtEq {
+    /// Returns a `CtBool` indicating whether `self` is greater than `other` in constant time.
     fn ct_gt(&self, other: &Self) -> CtBool;
 
+    /// Returns a `CtBool` indicating whether `self` is less than or equal to `other` in constant time.
+    ///
+    /// This is the logical negation of `ct_gt`.
     #[inline]
     fn ct_leq(&self, other: &Self) -> CtBool {
         !self.ct_gt(other)
     }
 
+    /// Returns a `CtBool` indicating whether `self` is less than `other` in constant time.
     #[inline]
     fn ct_lt(&self, other: &Self) -> CtBool {
         other.ct_gt(self)
     }
 
+    /// Returns a `CtBool` indicating whether `self` is greater than or equal to `other` in constant time.
+    ///
+    /// This is the logical negation of `ct_lt`.
     #[inline]
     fn ct_geq(&self, other: &Self) -> CtBool {
         !self.ct_lt(other)
     }
 
+    /// Returns the maximum of `self` and `other` in constant time.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cnti::CtOrd;
+    ///
+    /// assert_eq!(5u32.ct_max(&10), 10);
+    /// assert_eq!(10u32.ct_max(&5), 10);
+    /// ```
     #[inline]
+    #[must_use]
     fn ct_max(&self, other: &Self) -> Self
     where
         Self: CtSelect,
@@ -300,7 +368,18 @@ pub trait CtOrd: CtEq {
         self.ct_gt(other).if_true(self).else_(other)
     }
 
+    /// Returns the minimum of `self` and `other` in constant time.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cnti::CtOrd;
+    ///
+    /// assert_eq!(5u32.ct_min(&10), 5);
+    /// assert_eq!(10u32.ct_min(&5), 5);
+    /// ```
     #[inline]
+    #[must_use]
     fn ct_min(&self, other: &Self) -> Self
     where
         Self: CtSelect,
@@ -308,7 +387,22 @@ pub trait CtOrd: CtEq {
         self.ct_gt(other).if_false(self).else_(other)
     }
 
+    /// Restricts `self` to a certain interval in constant time.
+    ///
+    /// Returns `max` if `self` is greater than `max`, `min` if `self` is less than `min`,
+    /// and `self` otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cnti::CtOrd;
+    ///
+    /// assert_eq!(5u32.ct_clamp(&10, &20), 10);
+    /// assert_eq!(15u32.ct_clamp(&10, &20), 15);
+    /// assert_eq!(25u32.ct_clamp(&10, &20), 20);
+    /// ```
     #[inline]
+    #[must_use]
     fn ct_clamp(&self, min: &Self, max: &Self) -> Self
     where
         Self: CtSelect,
@@ -328,6 +422,7 @@ macro_rules! impl_int_no_select {
             // CtBool::protect(*self == *other).
             // The compiler can tell this is equality, it outputs a cmp instruction on x86
             // But our other measures still prevent it from outputting branches
+            #[allow(clippy::cast_possible_truncation)]
             fn ct_eq(&self, other: &$t_u) -> CtBool {
                 // x == 0 if and only if self == other
                 let x = self ^ other;
@@ -345,11 +440,12 @@ macro_rules! impl_int_no_select {
             #[inline]
             fn ct_eq(&self, other: &$t_i) -> CtBool {
                 // Bitcast to unsigned and call that implementation.
-                (*self as $t_u).ct_eq(&(*other as $t_u))
+                (*self).cast_unsigned().ct_eq(&(*other).cast_unsigned())
             }
         }
 
         impl CtOrd for $t_u {
+            #[allow(clippy::cast_possible_truncation)]
             fn ct_gt(&self, other: &$t_u) -> CtBool {
                 let a = *self;
                 let b = *other;
@@ -360,10 +456,11 @@ macro_rules! impl_int_no_select {
         }
 
         impl CtOrd for $t_i {
+            #[allow(clippy::cast_possible_truncation)]
             fn ct_gt(&self, other: &Self) -> CtBool {
                 let sign_mask = 1 << (<$t_i>::BITS - 1);
-                let a = (*self as $t_u) ^ sign_mask;
-                let b = (*other as $t_u) ^ sign_mask;
+                let a = self.cast_unsigned() ^ sign_mask;
+                let b = other.cast_unsigned() ^ sign_mask;
                 a.ct_gt(&b)
             }
         }
@@ -384,9 +481,9 @@ macro_rules! impl_int {
         impl CtSelect for $t_i {
             #[inline]
             fn ct_select(choice: CtBool, then: &Self, else_: &Self) -> Self {
-                let then = *then as $t_u;
-                let else_ = *else_ as $t_u;
-                CtSelect::ct_select(choice, &then, &else_) as $t_i
+                let then = then.cast_unsigned();
+                let else_ = else_.cast_unsigned();
+                CtSelect::ct_select(choice, &then, &else_).cast_signed()
             }
         }
         impl_int_no_select!($t_u, $t_i);
@@ -406,6 +503,7 @@ impl_int_no_select!(usize, isize);
 #[cfg(target_pointer_width = "64")]
 impl CtSelect for usize {
     #[inline]
+    #[allow(clippy::cast_possible_truncation)]
     fn ct_select(choice: CtBool, then: &Self, else_: &Self) -> Self {
         let then = *then as u64;
         let else_ = *else_ as u64;
@@ -416,6 +514,7 @@ impl CtSelect for usize {
 #[cfg(target_pointer_width = "32")]
 impl CtSelect for usize {
     #[inline]
+    #[allow(clippy::cast_possible_truncation)]
     fn ct_select(choice: CtBool, then: &Self, else_: &Self) -> Self {
         let then = *then as u32;
         let else_ = *else_ as u32;
@@ -427,18 +526,32 @@ impl CtSelect for usize {
 impl CtSelect for isize {
     #[inline]
     fn ct_select(choice: CtBool, then: &Self, else_: &Self) -> Self {
-        let then = *then as usize;
-        let else_ = *else_ as usize;
-        choice.if_true(&then).else_(&else_) as isize
+        let then = then.cast_unsigned();
+        let else_ = else_.cast_unsigned();
+        choice.if_true(&then).else_(&else_).cast_signed()
     }
 }
 
 /// Constant time selection based on a [`CtBool`].
 ///
-///
 /// Implementors of this trait additionally get a blanket implementation for [`CtSelectExt`] which
 /// provides conditional assignment, swapping, etc.
+///
+/// # Examples
+///
+/// ```
+/// use cnti::{CtSelect, CtBool};
+///
+/// let result = u32::ct_select(CtBool::TRUE, &42, &100);
+/// assert_eq!(result, 42);
+///
+/// let result = u32::ct_select(CtBool::FALSE, &42, &100);
+/// assert_eq!(result, 100);
+/// ```
 pub trait CtSelect: Sized {
+    /// Selects `then` if `choice` is true, otherwise selects `else_`, in constant time.
+    ///
+    /// This operation always executes in constant time regardless of the value of `choice`.
     fn ct_select(choice: CtBool, then: &Self, else_: &Self) -> Self;
 }
 
@@ -476,12 +589,13 @@ pub trait CtSelectExt: CtSelect {
     /// assert_eq!(old_a, a);
     /// ```
     ///
+    #[must_use]
     fn ct_replace_if(&mut self, other: &Self, choice: CtBool) -> Self {
         core::mem::replace(self, Self::ct_select(choice, other, self))
     }
 
     /// Conditionally swaps `other` with `self`
-    /// In other words, x.ct_swap_if(&mut y, choice)` is the constant-time equivalent of
+    /// In other words, `x.ct_swap_if(&mut y, choice)` is the constant-time equivalent of
     /// ```text
     /// if choice.expose() {
     ///     core::mem::swap(&mut x, &mut y);
@@ -506,11 +620,11 @@ pub trait CtSelectExt: CtSelect {
     ///
     /// assert_eq!(a, 0);
     /// assert_eq!(b, 1);
-    ///
+    /// ```
     #[inline]
     fn ct_swap_if(&mut self, other: &mut Self, choice: CtBool) {
         let old_self = self.ct_replace_if(other, choice);
-        other.ct_replace_if(&old_self, choice);
+        let _ = other.ct_replace_if(&old_self, choice);
     }
 
     /// Conditionally assigns `self` to `Self::default()` returning whatever the original value of `self`
@@ -535,8 +649,9 @@ pub trait CtSelectExt: CtSelect {
     /// a.ct_take_if(CtBool::FALSE);
     ///
     /// assert_eq!(a, 1);
-    ///
+    /// ```
     #[inline]
+    #[must_use]
     fn ct_take_if(&mut self, choice: CtBool) -> Self
     where
         Self: Default,
@@ -569,15 +684,43 @@ impl<T: CtSelect, const N: usize> CtSelect for [T; N] {
     }
 }
 
-/// Unlike [T; N], [T] does not implement [`CtEq`] and [`CtOrd`] because the length is not known at
-/// compile time, and as such the time for these operations are inherently not data-independent.
-/// However, in many cases, the length of a lice is not in fact secret (even if it isn't known at
-/// compile time), and for such cases, one can construct a `PublicLenSlice<T>` which asserts that
-/// operations which leak information about the length are ok.
+/// Unlike `[T; N]` (which already implements [`CtEq`] and [`CtOrd`]), `[T]` does not implement
+/// these traits because the length is not known at compile time, and as such the time for these
+/// operations are inherently not data-independent.
+///
+/// However, in many cases, the length of a slice is not in fact secret (even if it isn't known at
+/// compile time), and for such cases, one can explicitly construct a `&PublicLenSlice<T>` from a
+/// `&[T]` (via [`PublicLenSlice::from_slice`]) which asserts that operations which leak the
+/// lengths of the given slices through timing are acceptable.
+///
+/// Note that aside from having implementations for `CtEq` and `CtOrd`, this type behaves exactly
+/// like `[T]`. References to it decay to `&[T]`. This means that e.g. `==` uses `[T]::eq`. It is
+/// not a 'constant time slice', it is a slice where the programmer explicitly opts in to length
+/// short-circuiting meaning that it can implement `CtEq` and `CtOrd`.
 #[repr(transparent)]
 pub struct PublicLenSlice<T>(pub [T]);
 
 impl<T> PublicLenSlice<T> {
+    /// Creates a `&PublicLenSlice<T>` from a `&[T]`.
+    ///
+    /// This explicitly marks that operations which leak the length of the slice through
+    /// timing are acceptable.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cnti::{PublicLenSlice, CtEq};
+    ///
+    /// let data = vec![1u32, 2, 3];
+    /// let slice: &[u32] = &data[..];
+    /// let public_len_slice = PublicLenSlice::from_slice(slice);
+    ///
+    /// let other = vec![1u32, 2, 3];
+    /// let other_slice: &[u32] = &other[..];
+    /// let other_public_len = PublicLenSlice::from_slice(other_slice);
+    ///
+    /// assert!(public_len_slice.ct_eq(other_public_len).expose());
+    /// ```
     pub fn from_slice(slice: &[T]) -> &Self {
         // # SAFETY:
         // This is safe because #[repr(transparent)]
@@ -586,6 +729,30 @@ impl<T> PublicLenSlice<T> {
         unsafe { &*ptr }
     }
 
+    /// Creates a `&mut PublicLenSlice<T>` from a `&mut [T]`.
+    ///
+    /// This explicitly marks that operations which leak the length of the slice through
+    /// timing are acceptable.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cnti::{PublicLenSlice, CtOrd, CtSelectExt, CtBool};
+    ///
+    /// let mut data = vec![1u32, 2, 3];
+    /// let slice: &mut [u32] = &mut data[..];
+    /// let public_len_slice = PublicLenSlice::from_mut_slice(slice);
+    ///
+    /// // Perform conditional assignment
+    /// public_len_slice[0].ct_replace_if(&42, CtBool::TRUE);
+    /// assert_eq!(public_len_slice[0], 42);
+    ///
+    /// // Can now use CtOrd operations on the slice
+    /// let other = vec![1u32, 2, 3];
+    /// let other_slice: &[u32] = &other[..];
+    /// let other_public_len = PublicLenSlice::from_slice(other_slice);
+    /// assert!(public_len_slice.ct_gt(other_public_len).expose());
+    /// ```
     pub fn from_mut_slice(slice: &mut [T]) -> &mut Self {
         // # SAFETY:
         // This is safe because #[repr(transparent)]
@@ -597,7 +764,7 @@ impl<T> PublicLenSlice<T> {
 
 impl<T> core::fmt::Debug for &PublicLenSlice<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "PublicLenSlice")
+        write!(f, "PublicLenSlice([_; {}])", self.len())
     }
 }
 
@@ -610,6 +777,26 @@ impl<'a, T> From<&'a [T]> for &'a PublicLenSlice<T> {
 impl<'a, T> From<&'a mut [T]> for &'a mut PublicLenSlice<T> {
     fn from(value: &'a mut [T]) -> Self {
         PublicLenSlice::from_mut_slice(value)
+    }
+}
+
+impl<T, U> core::borrow::Borrow<T> for PublicLenSlice<U>
+where
+    T: ?Sized,
+    <PublicLenSlice<U> as Deref>::Target: core::borrow::Borrow<T>,
+{
+    fn borrow(&self) -> &T {
+        self.deref().borrow()
+    }
+}
+
+impl<T, U> core::borrow::BorrowMut<T> for PublicLenSlice<U>
+where
+    T: ?Sized,
+    <PublicLenSlice<U> as Deref>::Target: core::borrow::BorrowMut<T>,
+{
+    fn borrow_mut(&mut self) -> &mut T {
+        self.deref_mut().borrow_mut()
     }
 }
 
@@ -667,16 +854,15 @@ impl<T: CtEq> CtEq for PublicLenSlice<T> {
 impl<T: CtOrd> CtOrd for PublicLenSlice<T> {
     #[inline]
     fn ct_gt(&self, other: &Self) -> CtBool {
-        if self.len() == other.len() {
-            util::ct_zip_all(self, other, CtOrd::ct_gt)
-        } else {
-            CtBool::protect(self.len() > other.len())
+        if self.len() != other.len() {
+            return CtBool::protect(self.len() > other.len());
         }
+        util::ct_lexicographic_gt(self, other)
     }
 }
 
 mod util {
-    use super::CtBool;
+    use super::{CtBool, CtOrd};
     // this will leak min(lhs.len(), rhs.len())!
     pub(crate) fn ct_zip_all<T>(lhs: &[T], rhs: &[T], f: impl Fn(&T, &T) -> CtBool) -> CtBool {
         lhs.iter()
@@ -690,6 +876,26 @@ mod util {
         lhs.iter()
             .zip(rhs)
             .fold(CtBool::FALSE, |acc, (l, r)| acc | f(l, r))
+    }
+
+    // Lexicographic comparison: returns true if lhs > rhs in constant time
+    // Iterates through all elements to avoid timing leaks
+    pub(crate) fn ct_lexicographic_gt<T: CtOrd>(lhs: &[T], rhs: &[T]) -> CtBool {
+        let mut result = CtBool::FALSE;
+        let mut found_diff = CtBool::FALSE;
+
+        for (l, r) in lhs.iter().zip(rhs) {
+            let is_gt = l.ct_gt(r);
+            let is_eq = l.ct_eq(r);
+
+            // Update result only if we haven't found a difference yet
+            result = found_diff.if_true(&result).else_(&is_gt);
+
+            // Mark that we found a difference if elements are not equal
+            found_diff |= !is_eq;
+        }
+
+        result
     }
 
     // Takes two arrays of size n and produces a new array of size n whose ith element is f(lhs[i],
@@ -708,7 +914,7 @@ mod util {
     pub(crate) unsafe fn i8_to_ordering(x: i8) -> core::cmp::Ordering {
         debug_assert!(x == -1 || x == 0 || x == 1);
 
-        let res_ptr = &raw const x as *const core::cmp::Ordering;
+        let res_ptr = (&raw const x).cast();
         // # SAFETY: this is safe because core::cmp::Ordering is repr(i8) with all variants in the
         // range {-1, 0, 1}. Per the safety contract of this function, x in {-1, 0, 1}
         unsafe { *res_ptr }

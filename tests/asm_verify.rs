@@ -121,10 +121,14 @@ mod tests {
     use super::*;
 
     fn asm_branchless(platform: Platform, test_fun: TestFunction) {
-        println!("\n=== Testing on {:?} ===", platform);
         let asm = AsmTest::new(platform).compile_and_inspect(test_fun);
 
-        println!("Assembly:\n{}", asm);
+        println!(
+            "\n=== {} on {:?} === \n{}",
+            test_fun.as_function_name(),
+            platform,
+            asm
+        );
         verify_no_branch(
             &asm,
             &format!("{} on {:?}", test_fun.as_function_name(), platform),

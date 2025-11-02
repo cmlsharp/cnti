@@ -6,7 +6,7 @@ use core::ops::Deref;
 // is deriving this fine, or should i manually impl so pulling stuff out of blackbox goes through
 // expose?
 #[derive(Clone, Copy, Default)]
-/// Puts T behind a core::hint::black_box optimization barrier.
+/// Puts T behind a `core::hint::black_box` optimization barrier.
 /// Note that this is just a best effort attempt to prevent LLVM from making
 /// non-constant-time optimizations wrt T. The compiler is technically free to ignore this.
 /// Assembly should always be manually verified.
