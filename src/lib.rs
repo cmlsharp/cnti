@@ -100,13 +100,33 @@ impl CtBool {
     /// # let a = 12;
     /// # let b = 13;
     ///
-    /// let result = x.ct_eq(&y).then(&a).else_(&b);
+    /// let result = x.ct_eq(&y).if_true(&a).else_(&b);
     /// let equivalent = CtSelect::ct_select(x.ct_eq(&y), &a, &b);
     ///
     /// assert_eq!(result, equivalent)
     /// ```
-    pub fn then<'a, T: CtSelect>(&self, then: &'a T) -> Then<'a, T> {
-        Then { cond: *self, then }
+    pub fn if_true<'a, T: CtSelect>(&self, then: &'a T) -> CtIf<'a, T, true> {
+        CtIf::<'_, _, true> { cond: *self, then }
+    }
+
+    /// Perform a constant time selection via method chain syntax instead of calling
+    /// [`CtSelect::ct_select`].
+    ///
+    ///
+    /// ```
+    /// # use cnti::{CtBool, CtSelect, CtEq};
+    /// # let x = 10i32;
+    /// # let y = 11;
+    /// # let a = 12;
+    /// # let b = 13;
+    ///
+    /// let result = x.ct_eq(&y).if_false(&a).else_(&b);
+    /// let equivalent = CtSelect::ct_select(x.ct_eq(&y), &b, &a);
+    ///
+    /// assert_eq!(result, equivalent)
+    /// ```
+    pub fn if_false<'a, T: CtSelect>(&self, then: &'a T) -> CtIf<'a, T, false> {
+        CtIf::<'_, _, false> { cond: *self, then }
     }
 
     #[inline]
@@ -127,21 +147,28 @@ impl CtBool {
 }
 
 /// Represents an incomplete [`CtSelect`] expression.
-/// See the documentation for [`CtBool::then`].
-pub struct Then<'a, T> {
+/// See the documentation for [`CtBool::if_true`]/[`CtBool::if_false`].
+pub struct CtIf<'a, T, const TRUE: bool> {
     cond: CtBool,
     then: &'a T,
 }
 
-impl<T> Then<'_, T> {
+impl<T, const TRUE: bool> CtIf<'_, T, TRUE> {
     /// Perform the `ct_select` by providing the alternative value
     pub fn else_(self, else_: &T) -> T
     where
         T: CtSelect,
     {
-        CtSelect::ct_select(self.cond, self.then, else_)
+        if TRUE {
+            CtSelect::ct_select(self.cond, self.then, else_)
+        } else {
+            CtSelect::ct_select(self.cond, else_, self.then)
+        }
     }
 }
+
+/// Represents an incomplete [`CtSelect`] expression.
+/// See the documentation for [`CtBool::if_false`].
 
 impl BitAnd for CtBool {
     type Output = CtBool;
@@ -261,7 +288,7 @@ pub trait CtOrd: CtEq {
     where
         Self: CtSelect,
     {
-        self.ct_gt(other).then(self).else_(other)
+        self.ct_gt(other).if_true(self).else_(other)
     }
 
     #[inline]
@@ -269,7 +296,7 @@ pub trait CtOrd: CtEq {
     where
         Self: CtSelect,
     {
-        self.ct_lt(other).then(self).else_(other)
+        self.ct_lt(other).if_true(self).else_(other)
     }
 
     #[inline]
@@ -368,7 +395,7 @@ impl CtSelect for usize {
     fn ct_select(choice: CtBool, then: &Self, else_: &Self) -> Self {
         let then = *then as u64;
         let else_ = *else_ as u64;
-        choice.then(&then).else_(&else_) as usize
+        choice.if_true(&then).else_(&else_) as usize
     }
 }
 
@@ -378,7 +405,7 @@ impl CtSelect for usize {
     fn ct_select(choice: CtBool, then: &Self, else_: &Self) -> Self {
         let then = *then as u32;
         let else_ = *else_ as u32;
-        choice.then(&then).else_(&else_) as usize
+        choice.if_true(&then).else_(&else_) as usize
     }
 }
 
@@ -388,7 +415,7 @@ impl CtSelect for isize {
     fn ct_select(choice: CtBool, then: &Self, else_: &Self) -> Self {
         let then = *then as usize;
         let else_ = *else_ as usize;
-        choice.then(&then).else_(&else_) as isize
+        choice.if_true(&then).else_(&else_) as isize
     }
 }
 
@@ -511,7 +538,7 @@ impl CtSelect for core::cmp::Ordering {
     fn ct_select(choice: CtBool, then: &Self, else_: &Self) -> Self {
         let then = *then as i8;
         let else_ = *else_ as i8;
-        let res = choice.then(&then).else_(&else_);
+        let res = choice.if_true(&then).else_(&else_);
 
         // # SAFETY: res is guaranteed to be in {-1, 0, 1} because it is either a or b which were
         // originally orderings
@@ -523,7 +550,7 @@ impl<T: CtSelect, const N: usize> CtSelect for [T; N] {
     #[inline]
     fn ct_select(choice: CtBool, then: &[T; N], else_: &[T; N]) -> Self {
         util::arr_combine(then, else_, |t_elem, e_elem| {
-            choice.then(t_elem).else_(e_elem)
+            choice.if_true(t_elem).else_(e_elem)
         })
     }
 }
