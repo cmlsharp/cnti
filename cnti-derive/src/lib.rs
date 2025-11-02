@@ -88,15 +88,15 @@ fn crate_ident() -> proc_macro2::TokenStream {
     }
 }
 
-#[proc_macro_derive(CtPartialEq)]
+#[proc_macro_derive(CtEq)]
 pub fn derive_ct_partial_eq(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let crate_prefix = crate_ident();
-    let (name, generics, info) =
-        match prepare_struct(input, syn::parse_quote!(#crate_prefix::CtPartialEq)) {
-            Ok(v) => v,
-            Err(ts) => return ts,
-        };
+    let (name, generics, info) = match prepare_struct(input, syn::parse_quote!(#crate_prefix::CtEq))
+    {
+        Ok(v) => v,
+        Err(ts) => return ts,
+    };
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
     let body = if info.fields.is_empty() {
@@ -112,9 +112,9 @@ pub fn derive_ct_partial_eq(input: TokenStream) -> TokenStream {
     };
 
     quote! {
-        impl #impl_generics #crate_prefix::CtPartialEq for #name #ty_generics #where_clause {
+        impl #impl_generics #crate_prefix::CtEq for #name #ty_generics #where_clause {
             fn ct_eq(&self, other: &Self) -> CtBool {
-                use #crate_prefix::CtPartialEq as _;
+                use #crate_prefix::CtEq as _;
                 #body
             }
         }
@@ -154,23 +154,6 @@ pub fn derive_ct_select(input: TokenStream) -> TokenStream {
                 #body
             }
         }
-    }
-    .into()
-}
-
-#[proc_macro_derive(CtEq)]
-pub fn derive_ct_eq(input: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(input as DeriveInput);
-    let crate_prefix = crate_ident();
-    let (name, generics, _info) =
-        match prepare_struct(input, syn::parse_quote!(#crate_prefix::CtEq)) {
-            Ok(v) => v,
-            Err(ts) => return ts,
-        };
-    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
-
-    quote! {
-        impl #impl_generics #crate_prefix::CtEq for #name #ty_generics #where_clause {}
     }
     .into()
 }
@@ -229,7 +212,7 @@ pub fn derive_ct_ord(input: TokenStream) -> TokenStream {
         impl #impl_generics #crate_prefix::CtOrd for #name #ty_generics #where_clause {
             fn ct_gt(&self, other: &Self) -> CtBool {
                 use #crate_prefix::CtOrd as _;
-                use #crate_prefix::CtPartialEq as _;
+                use #crate_prefix::CtEq as _;
                 #body
             }
         }
