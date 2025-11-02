@@ -1,4 +1,4 @@
-use crate::{CtBool, CtEq, CtSelect, CtSelectExt};
+use crate::{CtBool, CtSelect, CtSelectExt};
 use core::ops::{Deref, DerefMut};
 
 /// The `CtOption<T>` type represents an optional value similar to the

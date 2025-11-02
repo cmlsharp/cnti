@@ -69,7 +69,7 @@ impl CtBool {
 
     #[inline]
     pub const fn protect(b: bool) -> Self {
-        CtBool::from_u8(b as u8)
+        CtBool::protect_u8(b as u8)
     }
 
     #[inline]
@@ -89,13 +89,57 @@ impl CtBool {
         self.0.expose_const()
     }
 
+    /// Perform a constant time selection via method chain syntax instead of calling
+    /// [`CtSelect::ct_select`].
+    ///
+    ///
+    /// ```
+    /// # use cnti::{CtBool, CtSelect, CtEq};
+    /// # let x = 10i32;
+    /// # let y = 11;
+    /// # let a = 12;
+    /// # let b = 13;
+    ///
+    /// let result = x.ct_eq(&y).then(&a).else_(&b);
+    /// let equivalent = CtSelect::ct_select(x.ct_eq(&y), &a, &b);
+    ///
+    /// assert_eq!(result, equivalent)
+    /// ```
+    pub fn then<'a, T: CtSelect>(&self, then: &'a T) -> Then<'a, T> {
+        Then { cond: *self, then }
+    }
+
     #[inline]
     // TODO: Decide whether we want to make this public
     // I'm kinda inclined to say no. If you have a u8, you can always
     // construct a CtBool via CtSelect::ct_select(my_u8.ct_eq(&0), CtBool::FALSE, CtBool::TRUE)
-    pub(crate) const fn from_u8(inner: u8) -> Self {
+    const fn protect_u8(inner: u8) -> Self {
         debug_assert!(inner == 0 || inner == 1);
         Self(BlackBox::protect(inner))
+    }
+
+    // this function should only ever be called when the optimizer should be unable to tell that
+    // the u8 must be either 0 or 1
+    const fn from_raw_unchecked(inner: u8) -> Self {
+        debug_assert!(inner == 0 || inner == 1);
+        Self(BlackBox::from_raw_unchecked(inner))
+    }
+}
+
+/// Represents an incomplete [`CtSelect`] expression.
+/// See the documentation for [`CtBool::then`].
+pub struct Then<'a, T> {
+    cond: CtBool,
+    then: &'a T,
+}
+
+impl<T> Then<'_, T> {
+    /// Perform the `ct_select` by providing the alternative value
+    pub fn else_(self, else_: &T) -> T
+    where
+        T: CtSelect,
+    {
+        CtSelect::ct_select(self.cond, self.then, else_)
     }
 }
 
@@ -103,7 +147,7 @@ impl BitAnd for CtBool {
     type Output = CtBool;
     #[inline]
     fn bitand(self, rhs: CtBool) -> CtBool {
-        CtBool::from_u8(self.to_u8() & rhs.to_u8())
+        CtBool::protect_u8(self.to_u8() & rhs.to_u8())
     }
 }
 
@@ -118,7 +162,9 @@ impl BitOr for CtBool {
     type Output = CtBool;
     #[inline]
     fn bitor(self, rhs: CtBool) -> CtBool {
-        CtBool::from_u8(self.to_u8() | rhs.to_u8())
+        // raw_unchecked is fine here because the invariant
+        // of ctbool is that the compiler can't tell if the k
+        CtBool::from_raw_unchecked(self.to_u8() | rhs.to_u8())
     }
 }
 
@@ -126,7 +172,7 @@ impl BitXor for CtBool {
     type Output = CtBool;
     #[inline]
     fn bitxor(self, rhs: Self) -> Self::Output {
-        CtBool::from_u8(self.to_u8() ^ rhs.to_u8())
+        CtBool::from_raw_unchecked(self.to_u8() ^ rhs.to_u8())
     }
 }
 
@@ -148,7 +194,9 @@ impl Not for CtBool {
     type Output = CtBool;
     #[inline]
     fn not(self) -> Self::Output {
-        CtBool::from_u8(1u8 & (!self.to_u8()))
+        // the optimizer can tell & 1 means the result is in {0,1}
+        // so we need to protect
+        CtBool::protect_u8(1u8 & (!self.to_u8()))
     }
 }
 
@@ -213,7 +261,7 @@ pub trait CtOrd: CtEq {
     where
         Self: CtSelect,
     {
-        Self::ct_select(self.ct_gt(other), self, other)
+        self.ct_gt(other).then(self).else_(other)
     }
 
     #[inline]
@@ -221,7 +269,7 @@ pub trait CtOrd: CtEq {
     where
         Self: CtSelect,
     {
-        Self::ct_select(self.ct_gt(other), self, other)
+        self.ct_lt(other).then(self).else_(other)
     }
 
     #[inline]
@@ -249,7 +297,7 @@ macro_rules! impl_int_no_select {
                 let y = (x | x.wrapping_neg()) >> (<$t_u>::BITS - 1);
 
                 // Result is the opposite of the high bit (now shifted to low).
-                CtBool::from_u8((y ^ 1) as u8)
+                CtBool::protect_u8((y ^ 1) as u8)
             }
         }
 
@@ -267,7 +315,7 @@ macro_rules! impl_int_no_select {
                 let b = *other;
                 let diff = b.wrapping_sub(a);
                 let res = ((!b & a) | ((!(a ^ b)) & diff)) >> (<$t_u>::BITS - 1);
-                CtBool::from_u8(res as u8)
+                CtBool::protect_u8(res as u8)
             }
         }
 
@@ -314,21 +362,33 @@ impl_int_no_select!(usize, isize);
 
 // these annoyingly don't have implementations in the cmov crate, pending that we just use the
 // portable fallback
+#[cfg(target_pointer_width = "64")]
 impl CtSelect for usize {
     #[inline]
     fn ct_select(choice: CtBool, then: &Self, else_: &Self) -> Self {
-        let mask = -(choice.to_u8() as isize) as usize;
-        else_ ^ (mask & (else_ ^ then))
+        let then = *then as u64;
+        let else_ = *else_ as u64;
+        choice.then(&then).else_(&else_) as usize
     }
 }
 
-// these annoyingly don't have implementations in the cmov crate, pending that we just use the
-// portable fallback
+#[cfg(target_pointer_width = "32")]
+impl CtSelect for usize {
+    #[inline]
+    fn ct_select(choice: CtBool, then: &Self, else_: &Self) -> Self {
+        let then = *then as u32;
+        let else_ = *else_ as u32;
+        choice.then(&then).else_(&else_) as usize
+    }
+}
+
+#[cfg(any(target_pointer_width = "64", target_pointer_width = "32"))]
 impl CtSelect for isize {
     #[inline]
     fn ct_select(choice: CtBool, then: &Self, else_: &Self) -> Self {
-        let mask = -(choice.to_u8() as isize);
-        else_ ^ (mask & (else_ ^ then))
+        let then = *then as usize;
+        let else_ = *else_ as usize;
+        choice.then(&then).else_(&else_) as isize
     }
 }
 
@@ -451,7 +511,7 @@ impl CtSelect for core::cmp::Ordering {
     fn ct_select(choice: CtBool, then: &Self, else_: &Self) -> Self {
         let then = *then as i8;
         let else_ = *else_ as i8;
-        let res = i8::ct_select(choice, &then, &else_);
+        let res = choice.then(&then).else_(&else_);
 
         // # SAFETY: res is guaranteed to be in {-1, 0, 1} because it is either a or b which were
         // originally orderings
@@ -463,7 +523,7 @@ impl<T: CtSelect, const N: usize> CtSelect for [T; N] {
     #[inline]
     fn ct_select(choice: CtBool, then: &[T; N], else_: &[T; N]) -> Self {
         util::arr_combine(then, else_, |t_elem, e_elem| {
-            CtSelect::ct_select(choice, t_elem, e_elem)
+            choice.then(t_elem).else_(e_elem)
         })
     }
 }

@@ -67,4 +67,8 @@ impl<T> BlackBox<T> {
     {
         self.0
     }
+
+    pub(crate) const fn from_raw_unchecked(inner: T) -> Self {
+        Self(inner)
+    }
 }
