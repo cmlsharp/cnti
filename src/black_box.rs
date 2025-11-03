@@ -45,6 +45,7 @@ impl<T> Deref for BlackBox<T> {
 }
 
 impl<T> BlackBox<T> {
+    /// Construct a `BlackBox<T>` putting the inner value through an optimization barrier.
     pub const fn protect(b: T) -> Self {
         // Important, this is the only public constructor for black box
         // meaning all values stored in black box have been passed through hint::black_box
@@ -55,12 +56,14 @@ impl<T> BlackBox<T> {
         Self(hint::black_box(b))
     }
 
-    // XXX once Destruct trait is stable, we can make this a const function probably
+    /// Reveal the underlying value
     pub fn expose(self) -> T {
         self.0
     }
 
     // TODO: deprecate once Destruct trait is stable
+    /// Equivalent to [`BlackBox::expose`] but suitable for `const` contexts.
+    /// This method will be deprecated when the status of `Drop` in const contexts improves.
     pub const fn expose_const(self) -> T
     where
         T: Copy,

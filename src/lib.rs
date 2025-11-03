@@ -1,5 +1,8 @@
-#![warn(clippy::pedantic)]
-#![cfg_attr(not(test), no_std)]
+#![doc = include_str!("../README.md")]
+#![warn(clippy::pedantic, clippy::all)]
+#![deny(warnings)]
+#![deny(missing_docs)]
+#![no_std]
 
 use core::ops::{
     BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Deref, DerefMut, Not,
@@ -270,6 +273,8 @@ impl Not for CtBool {
 /// returning a [`CtBool`] instead of a regular `bool`. The primary use case is in
 /// conjunction with [`CtSelect`] for constant-time conditional operations.
 ///
+/// This trait is derivable for structs via `#[derive(CtEq)]`
+///
 /// # Examples
 ///
 /// ```
@@ -317,6 +322,8 @@ impl<const N: usize, T: CtOrd> CtOrd for [T; N] {
 /// This trait provides methods for comparing values for ordering in constant time,
 /// returning a [`CtBool`] instead of a regular `bool`. The primary use case is in
 /// conjunction with [`CtSelect`] for constant-time conditional operations.
+///
+/// This trait is derivable for structs via `#[derive(CtOrd)]`
 ///
 /// # Examples
 ///
@@ -549,6 +556,7 @@ impl CtSelect for isize {
 /// Implementors of this trait additionally get a blanket implementation for [`CtSelectExt`] which
 /// provides conditional assignment, swapping, etc.
 ///
+/// This trait is derivable for structs via `#[derive(CtSelect)]`
 /// # Examples
 ///
 /// ```
