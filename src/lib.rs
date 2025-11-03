@@ -261,8 +261,10 @@ impl Not for CtBool {
     type Output = CtBool;
     #[inline]
     fn not(self) -> Self::Output {
-        // the optimizer can tell & 1 means the result is in {0,1}
-        // so we need to protect
+        // seems like the compiler can tell this should be 1 or 0?
+        // hence protect_u8
+        // That said I can't seem to get it to insert a branch even when i don't use this, so maybe
+        // not necessary?
         CtBool::protect_u8(1u8 & (!self.to_u8()))
     }
 }

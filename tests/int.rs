@@ -1,4 +1,4 @@
-use cnti::{CtBool, CtEq, CtOrd, CtSelect};
+use cnti::{CtBool, CtEq, CtOrd};
 use paste::paste;
 use quickcheck_macros::quickcheck;
 
@@ -8,7 +8,7 @@ macro_rules! test_ct_select {
                 #[quickcheck]
                 fn [<test_ct_select_$t>](select: bool, a: $t, b: $t) {
                     assert_eq!(
-                        CtSelect::ct_select(CtBool::protect(select), &a, &b),
+                        CtBool::protect(select).if_true(&a).else_(&b),
                         if select { a } else { b }
                     );
                 }

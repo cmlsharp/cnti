@@ -1,4 +1,4 @@
-use cnti::{CtBool, CtEq, CtSelect, CtOrd};
+use cnti::{CtBool, CtEq, CtOrd};
 
 // Tests for fixed length arrays
 #[test]
@@ -6,8 +6,8 @@ fn test_ct_select_array() {
     let a = [1u8, 2, 3, 4];
     let b = [5u8, 6, 7, 8];
 
-    assert_eq!(CtSelect::ct_select(CtBool::TRUE, &a, &b), a);
-    assert_eq!(CtSelect::ct_select(CtBool::FALSE, &a, &b), b);
+    assert_eq!(CtBool::TRUE.if_true(&a).else_(&b), a);
+    assert_eq!(CtBool::FALSE.if_true(&a).else_(&b), b);
 }
 
 #[test]
@@ -32,4 +32,3 @@ fn test_ct_ord_array() {
     assert!(a.ct_leq(&c).expose());
     assert!(a.ct_geq(&c).expose());
 }
-
