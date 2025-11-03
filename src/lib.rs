@@ -747,12 +747,10 @@ impl<T> PublicLenSlice<T> {
     /// use cnti::{PublicLenSlice, CtEq};
     ///
     /// let data = vec![1u32, 2, 3];
-    /// let slice: &[u32] = &data[..];
-    /// let public_len_slice = PublicLenSlice::from_slice(slice);
+    /// let public_len_slice = PublicLenSlice::from_slice(&data);
     ///
     /// let other = vec![1u32, 2, 3];
-    /// let other_slice: &[u32] = &other[..];
-    /// let other_public_len = PublicLenSlice::from_slice(other_slice);
+    /// let other_public_len = PublicLenSlice::from_slice(&other);
     ///
     /// assert!(public_len_slice.ct_eq(other_public_len).expose());
     /// ```
@@ -776,8 +774,7 @@ impl<T> PublicLenSlice<T> {
     /// use cnti::{PublicLenSlice, CtOrd, CtSelectExt, CtBool};
     ///
     /// let mut data = vec![1u32, 2, 3];
-    /// let slice: &mut [u32] = &mut data[..];
-    /// let public_len_slice = PublicLenSlice::from_mut_slice(slice);
+    /// let public_len_slice = PublicLenSlice::from_mut_slice(&mut data);
     ///
     /// // Perform conditional assignment
     /// public_len_slice[0].ct_replace_if(&42, CtBool::TRUE);
@@ -785,8 +782,7 @@ impl<T> PublicLenSlice<T> {
     ///
     /// // Can now use CtOrd operations on the slice
     /// let other = vec![1u32, 2, 3];
-    /// let other_slice: &[u32] = &other[..];
-    /// let other_public_len = PublicLenSlice::from_slice(other_slice);
+    /// let other_public_len = PublicLenSlice::from_slice(&other);
     /// assert!(public_len_slice.ct_gt(other_public_len).expose());
     /// ```
     #[must_use]
