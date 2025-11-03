@@ -21,13 +21,14 @@ pub use option::CtOption;
 /// It aims to prevent LLVM from using its knowledge of the fact that a bool is either `0` or `1`
 /// to re-insert branches in otherwise branchless code. Constructing a `CtBool` from
 /// `CtBool::protect(my_boolean)` passes the boolean through an optimization barrier that is a
-/// best-effort attempt to prevent such optimizations. It is very similar to
+/// best-effort attempt to prevent such optimizations. This should be done as early as possible in
+/// the computation. It is very similar to
 /// [`subtle::Choice`](https://docs.rs/subtle/2.6.1/subtle/struct.Choice.html).
 ///
 /// # Example usage:
 ///
 /// ```no_run
-/// use cnti::{CtBool, CtEq, CtSelect, CtSelectExt};
+/// use cnti::{CtBool, CtEq, CtSelectExt};
 /// # let a: u8 = 12;
 /// # let b = 13;
 /// # let mut c = 15;
@@ -131,6 +132,7 @@ impl CtBool {
     /// assert_eq!(result, equivalent)
     /// ```
     #[inline]
+    #[must_use]
     pub fn if_true<'a, T: CtSelect>(&self, then: &'a T) -> CtIf<'a, T, true> {
         CtIf::<'_, _, true> { cond: *self, then }
     }
@@ -153,6 +155,7 @@ impl CtBool {
     /// assert_eq!(result, equivalent)
     /// ```
     #[inline]
+    #[must_use]
     pub fn if_false<'a, T: CtSelect>(&self, then: &'a T) -> CtIf<'a, T, false> {
         CtIf::<'_, _, false> { cond: *self, then }
     }
@@ -163,6 +166,7 @@ impl CtBool {
     // construct a CtBool via my_u8.ct_neq(&0).if_true(CtBool::TRUE).else_(CtBool::FALSE)
     // I want a privat einner function for cases where I _know_ the u8 is 1 or 0 (but i want to
     // hide this from the optimizer).
+    #[must_use]
     const fn protect_u8(inner: u8) -> Self {
         debug_assert!(inner == 0 || inner == 1);
         Self(BlackBox::protect(inner))
@@ -170,6 +174,7 @@ impl CtBool {
 
     // this function should only ever be called when the optimizer should be unable to tell that
     // the u8 must be either 0 or 1
+    #[must_use]
     const fn from_u8_no_protect(inner: u8) -> Self {
         debug_assert!(inner == 0 || inner == 1);
         Self(BlackBox::from_raw_unchecked(inner))
@@ -185,6 +190,7 @@ pub struct CtIf<'a, T, const IS_TRUE: bool> {
 
 impl<T, const IS_TRUE: bool> CtIf<'_, T, IS_TRUE> {
     /// Perform the `ct_select` by providing the alternative value
+    #[must_use]
     pub fn else_(self, else_: &T) -> T
     where
         T: CtSelect,
@@ -279,12 +285,14 @@ impl Not for CtBool {
 /// ```
 pub trait CtEq {
     /// Returns a `CtBool` indicating whether `self` equals `other` in constant time.
+    #[must_use]
     fn ct_eq(&self, other: &Self) -> CtBool;
 
     /// Returns a `CtBool` indicating whether `self` does not equal `other` in constant time.
     ///
     /// This is the logical negation of `ct_eq`.
     #[inline]
+    #[must_use]
     fn ct_neq(&self, other: &Self) -> CtBool {
         !self.ct_eq(other)
     }
@@ -325,18 +333,21 @@ impl<const N: usize, T: CtOrd> CtOrd for [T; N] {
 /// ```
 pub trait CtOrd: CtEq {
     /// Returns a `CtBool` indicating whether `self` is greater than `other` in constant time.
+    #[must_use]
     fn ct_gt(&self, other: &Self) -> CtBool;
 
     /// Returns a `CtBool` indicating whether `self` is less than or equal to `other` in constant time.
     ///
     /// This is the logical negation of `ct_gt`.
     #[inline]
+    #[must_use]
     fn ct_leq(&self, other: &Self) -> CtBool {
         !self.ct_gt(other)
     }
 
     /// Returns a `CtBool` indicating whether `self` is less than `other` in constant time.
     #[inline]
+    #[must_use]
     fn ct_lt(&self, other: &Self) -> CtBool {
         other.ct_gt(self)
     }
@@ -345,6 +356,7 @@ pub trait CtOrd: CtEq {
     ///
     /// This is the logical negation of `ct_lt`.
     #[inline]
+    #[must_use]
     fn ct_geq(&self, other: &Self) -> CtBool {
         !self.ct_lt(other)
     }
@@ -548,10 +560,19 @@ impl CtSelect for isize {
 /// let result = u32::ct_select(CtBool::FALSE, &42, &100);
 /// assert_eq!(result, 100);
 /// ```
+// TODO: Figure out if it makes sense for this to take by value!
+// This would allow for efficient implementations of e.g. CtSelect for
+// larger data structures that wouldn't implicitly require cloning
+// But I don't know how to generically write e.g. swap_if or replace_if in terms of ct_select in that
+// case, they couldn't have default impls any more which would suck
+// The interface would have to change, something like returning both the taken and not taken value
+// However, it would be very easy to accidentally implement such an interface in such a way that
+// would leak info thru memory access pattern
 pub trait CtSelect: Sized {
     /// Selects `then` if `choice` is true, otherwise selects `else_`, in constant time.
     ///
     /// This operation always executes in constant time regardless of the value of `choice`.
+    #[must_use]
     fn ct_select(choice: CtBool, then: &Self, else_: &Self) -> Self;
 }
 
@@ -721,6 +742,7 @@ impl<T> PublicLenSlice<T> {
     ///
     /// assert!(public_len_slice.ct_eq(other_public_len).expose());
     /// ```
+    #[must_use]
     pub fn from_slice(slice: &[T]) -> &Self {
         // # SAFETY:
         // This is safe because #[repr(transparent)]
@@ -753,6 +775,7 @@ impl<T> PublicLenSlice<T> {
     /// let other_public_len = PublicLenSlice::from_slice(other_slice);
     /// assert!(public_len_slice.ct_gt(other_public_len).expose());
     /// ```
+    #[must_use]
     pub fn from_mut_slice(slice: &mut [T]) -> &mut Self {
         // # SAFETY:
         // This is safe because #[repr(transparent)]
@@ -864,6 +887,7 @@ impl<T: CtOrd> CtOrd for PublicLenSlice<T> {
 mod util {
     use super::{CtBool, CtOrd};
     // this will leak min(lhs.len(), rhs.len())!
+    #[must_use]
     pub(crate) fn ct_zip_all<T>(lhs: &[T], rhs: &[T], f: impl Fn(&T, &T) -> CtBool) -> CtBool {
         lhs.iter()
             .zip(rhs)
@@ -872,6 +896,7 @@ mod util {
 
     // this will leak min(lhs.len(), rhs.len())
     #[allow(unused)]
+    #[must_use]
     pub(crate) fn ct_zip_any<T>(lhs: &[T], rhs: &[T], f: impl Fn(&T, &T) -> CtBool) -> CtBool {
         lhs.iter()
             .zip(rhs)
@@ -880,6 +905,7 @@ mod util {
 
     // Lexicographic comparison: returns true if lhs > rhs in constant time
     // Iterates through all elements to avoid timing leaks
+    #[must_use]
     pub(crate) fn ct_lexicographic_gt<T: CtOrd>(lhs: &[T], rhs: &[T]) -> CtBool {
         let mut result = CtBool::FALSE;
         let mut found_diff = CtBool::FALSE;
@@ -900,6 +926,7 @@ mod util {
 
     // Takes two arrays of size n and produces a new array of size n whose ith element is f(lhs[i],
     // rhs[i])
+    #[must_use]
     pub(crate) fn arr_combine<T, const N: usize, U>(
         lhs: &[T; N],
         rhs: &[T; N],
@@ -911,6 +938,7 @@ mod util {
     }
 
     // # SAFETY: x must be in {-1, 0, 1}
+    #[must_use]
     pub(crate) unsafe fn i8_to_ordering(x: i8) -> core::cmp::Ordering {
         debug_assert!(x == -1 || x == 0 || x == 1);
 
