@@ -1,7 +1,7 @@
 #![doc = include_str!("../README.md")]
-#![warn(clippy::pedantic, clippy::all)]
 #![deny(warnings)]
-#![deny(missing_docs)]
+#![warn(clippy::pedantic, clippy::all)]
+#![warn(missing_docs)]
 #![no_std]
 
 use core::ops::{
@@ -459,7 +459,7 @@ macro_rules! impl_int_no_select {
             #[inline]
             fn ct_eq(&self, other: &$t_i) -> CtBool {
                 // Bitcast to unsigned and call that implementation.
-                (*self).cast_unsigned().ct_eq(&(*other).cast_unsigned())
+                self.cast_unsigned().ct_eq(&other.cast_unsigned())
             }
         }
 
@@ -500,9 +500,10 @@ macro_rules! impl_int {
         impl CtSelect for $t_i {
             #[inline]
             fn ct_select(choice: CtBool, then: &Self, else_: &Self) -> Self {
-                let then = then.cast_unsigned();
-                let else_ = else_.cast_unsigned();
-                CtSelect::ct_select(choice, &then, &else_).cast_signed()
+                choice
+                    .if_true(&then.cast_unsigned())
+                    .else_(&else_.cast_unsigned())
+                    .cast_signed()
             }
         }
         impl_int_no_select!($t_u, $t_i);
@@ -545,9 +546,10 @@ impl CtSelect for usize {
 impl CtSelect for isize {
     #[inline]
     fn ct_select(choice: CtBool, then: &Self, else_: &Self) -> Self {
-        let then = then.cast_unsigned();
-        let else_ = else_.cast_unsigned();
-        choice.if_true(&then).else_(&else_).cast_signed()
+        choice
+            .if_true(&then.cast_unsigned())
+            .else_(&else_.cast_unsigned())
+            .cast_signed()
     }
 }
 
@@ -562,12 +564,16 @@ impl CtSelect for isize {
 /// ```
 /// use cnti::{CtSelect, CtBool};
 ///
-/// let result = u32::ct_select(CtBool::TRUE, &42, &100);
+/// let cond = CtBool::TRUE;
+/// let result = u32::ct_select(cond, &42, &100);
 /// assert_eq!(result, 42);
 ///
-/// let result = u32::ct_select(CtBool::FALSE, &42, &100);
-/// assert_eq!(result, 100);
+/// // or equivalently
+///
+/// let result = cond.if_true(&42).else_(&100);
+/// assert_eq!(result, 42);
 /// ```
+///
 // TODO: Figure out if it makes sense for this to take by value!
 // This would allow for efficient implementations of e.g. CtSelect for
 // larger data structures that wouldn't implicitly require cloning

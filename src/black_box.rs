@@ -2,14 +2,12 @@ use crate::{CtBool, CtEq, CtOrd, CtSelect};
 use core::hint;
 use core::ops::Deref;
 
-#[repr(transparent)]
-// is deriving this fine, or should i manually impl so pulling stuff out of blackbox goes through
-// expose?
-#[derive(Clone, Copy, Default)]
 /// Puts T behind a `core::hint::black_box` optimization barrier.
 /// Note that this is just a best effort attempt to prevent LLVM from making
 /// non-constant-time optimizations wrt T. The compiler is technically free to ignore this.
 /// Assembly should always be manually verified.
+#[repr(transparent)]
+#[derive(Clone, Copy, Default)]
 pub struct BlackBox<T>(T);
 
 impl<T: CtEq> CtEq for BlackBox<T> {
@@ -46,6 +44,7 @@ impl<T> Deref for BlackBox<T> {
 
 impl<T> BlackBox<T> {
     /// Construct a `BlackBox<T>` putting the inner value through an optimization barrier.
+    #[must_use]
     pub const fn protect(b: T) -> Self {
         // Important, this is the only public constructor for black box
         // meaning all values stored in black box have been passed through hint::black_box
@@ -57,6 +56,7 @@ impl<T> BlackBox<T> {
     }
 
     /// Reveal the underlying value
+    #[must_use]
     pub fn expose(self) -> T {
         self.0
     }
@@ -64,6 +64,7 @@ impl<T> BlackBox<T> {
     // TODO: deprecate once Destruct trait is stable
     /// Equivalent to [`BlackBox::expose`] but suitable for `const` contexts.
     /// This method will be deprecated when the status of `Drop` in const contexts improves.
+    #[must_use]
     pub const fn expose_const(self) -> T
     where
         T: Copy,
