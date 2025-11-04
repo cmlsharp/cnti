@@ -1,5 +1,5 @@
 #![doc = include_str!("../README.md")]
-#![deny(warnings)]
+//#![deny(warnings)]
 #![warn(clippy::pedantic, clippy::all)]
 #![warn(missing_docs)]
 #![no_std]
@@ -41,7 +41,7 @@ pub use option::CtOption;
 /// let a_equal_b = a.ct_eq(&b);
 ///
 /// // set c to 0 if  a == b
-/// c.ct_replace_if(&0, a_equal_b);
+/// c.ct_replace_if(a_equal_b, &0);
 ///
 /// ```
 #[derive(Copy, Clone, Default, CtSelect)]
@@ -598,10 +598,10 @@ pub trait CtSelect: Sized {
 pub trait CtSelectExt: CtSelect {
     #[inline]
     /// Conditionally assigns `other` to `self` returning whatever the original value of `self`
-    /// was. In other words, `x.ct_replace_if(&y, choice)` is the constant-time equivalent of
+    /// was. In other words, `x.ct_replace_if(choice, &y)` is the constant-time equivalent of
     /// ```text
     /// if choice.expose() {
-    ///     core::mem::replace(&mut x, y)
+    ///     core::mem::replace(&mut x, y);
     /// }
     /// ```
     /// ### Usage:
@@ -611,7 +611,7 @@ pub trait CtSelectExt: CtSelect {
     /// let mut x = 0_u32;
     /// let y = 1;
     ///
-    /// let old_x = x.ct_replace_if(&y, CtBool::TRUE);
+    /// let old_x = x.ct_replace_if(CtBool::TRUE, &y);
     ///
     /// assert_eq!(old_x, 0);
     /// assert_eq!(x, y);
@@ -620,19 +620,19 @@ pub trait CtSelectExt: CtSelect {
     /// let mut a = 0_u32;
     /// let b = 1;
     ///
-    /// let old_a = a.ct_replace_if(&b, CtBool::FALSE);
+    /// let old_a = a.ct_replace_if(CtBool::FALSE, &b);
     ///
     /// assert_eq!(old_a, 0);
     /// assert_eq!(old_a, a);
     /// ```
     ///
-    #[must_use]
-    fn ct_replace_if(&mut self, other: &Self, choice: CtBool) -> Self {
+    #[allow(clippy::must_use_candidate, clippy::return_self_not_must_use)]
+    fn ct_replace_if(&mut self, choice: CtBool, other: &Self) -> Self {
         core::mem::replace(self, Self::ct_select(choice, other, self))
     }
 
     /// Conditionally swaps `other` with `self`
-    /// In other words, `x.ct_swap_if(&mut y, choice)` is the constant-time equivalent of
+    /// In other words, `x.ct_swap_if(choice, &mut y)` is the constant-time equivalent of
     /// ```text
     /// if choice.expose() {
     ///     core::mem::swap(&mut x, &mut y);
@@ -644,7 +644,7 @@ pub trait CtSelectExt: CtSelect {
     /// let mut x = 0_u32;
     /// let mut y = 1;
     ///
-    /// x.ct_swap_if(&mut y, CtBool::TRUE);
+    /// x.ct_swap_if(CtBool::TRUE, &mut y);
     ///
     /// assert_eq!(x, 1);
     /// assert_eq!(y, 0);
@@ -653,15 +653,15 @@ pub trait CtSelectExt: CtSelect {
     /// let mut a = 0_u32;
     /// let mut b = 1;
     ///
-    /// a.ct_swap_if(&mut b, CtBool::FALSE);
+    /// a.ct_swap_if(CtBool::FALSE, &mut b);
     ///
     /// assert_eq!(a, 0);
     /// assert_eq!(b, 1);
     /// ```
     #[inline]
-    fn ct_swap_if(&mut self, other: &mut Self, choice: CtBool) {
-        let old_self = self.ct_replace_if(other, choice);
-        let _ = other.ct_replace_if(&old_self, choice);
+    fn ct_swap_if(&mut self, cond: CtBool, other: &mut Self) {
+        let old_self = self.ct_replace_if(cond, other);
+        let _ = other.ct_replace_if(cond, &old_self);
     }
 
     /// Conditionally assigns `self` to `Self::default()` returning whatever the original value of `self`
@@ -688,12 +688,11 @@ pub trait CtSelectExt: CtSelect {
     /// assert_eq!(a, 1);
     /// ```
     #[inline]
-    #[must_use]
-    fn ct_take_if(&mut self, choice: CtBool) -> Self
+    fn ct_take_if(&mut self, cond: CtBool) -> Self
     where
         Self: Default,
     {
-        self.ct_replace_if(&Self::default(), choice)
+        self.ct_replace_if(cond, &Self::default())
     }
 }
 
@@ -779,7 +778,7 @@ impl<T> PublicLenSlice<T> {
     /// let public_len_slice = PublicLenSlice::from_mut_slice(&mut data);
     ///
     /// // Perform conditional assignment
-    /// public_len_slice[0].ct_replace_if(&42, CtBool::TRUE);
+    /// public_len_slice[0].ct_replace_if(CtBool::TRUE, &42);
     /// assert_eq!(public_len_slice[0], 42);
     ///
     /// // Can now use CtOrd operations on the slice

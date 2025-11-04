@@ -634,7 +634,7 @@ impl<T> CtOption<T> {
     where
         T: CtSelect,
     {
-        let _ = self.value.ct_replace_if(&value, !self.is_some);
+        self.value.ct_replace_if(!self.is_some, &value);
         &mut self.value
     }
 
@@ -658,7 +658,7 @@ impl<T> CtOption<T> {
     where
         T: CtSelect + Default,
     {
-        let _ = self.value.ct_take_if(!self.is_some());
+        self.value.ct_take_if(!self.is_some());
         &mut self.value
     }
 
