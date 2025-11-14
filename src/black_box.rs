@@ -52,8 +52,7 @@ impl<T> BlackBox<T> {
         // Doing so does actually prevent LLVM from optimizing e.g. duplicate loads from the stack
         // but we'd like to allow that optimization if we can
         // So for now, I'm sticking with just having it in the constructor
-        //Self(hint::black_box(b))
-        Self(b)
+        Self(hint::black_box(b))
     }
 
     /// Reveal the underlying value

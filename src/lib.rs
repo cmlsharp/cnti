@@ -688,6 +688,7 @@ pub trait CtSelectExt: CtSelect {
     /// assert_eq!(a, 1);
     /// ```
     #[inline]
+    #[allow(clippy::return_self_not_must_use)]
     fn ct_take_if(&mut self, cond: CtBool) -> Self
     where
         Self: Default,
