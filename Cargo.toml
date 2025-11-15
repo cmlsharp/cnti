@@ -5,14 +5,23 @@ edition = "2024"
 
 [dependencies]
 cmov = "0.4.0"
-cnti-derive = {path = "./cnti-derive"}
+cnti-derive = {path = "./cnti-derive", optional = true}
+
+[features]
+default = []
+derive = ["dep:cnti-derive"]
 
 [workspace]
 resolver = "3"
 members = [".", "cnti-derive"]
 
 [dev-dependencies]
+criterion = "0.7.0"
 paste = "1.0.15"
 quickcheck = "1.0.3"
 quickcheck_macros = "1.1.0"
 subtle = "2.6.1"
+
+[[bench]]
+name = "gt" # the name of the benchmark file's name
+harness = false

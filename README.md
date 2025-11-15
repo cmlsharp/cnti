@@ -1,6 +1,6 @@
 # cnti
 
-`cnti` is a low-level `no-std` library that provides abstractions for writing '__c__onsta__n__t __ti__me' programs (programs which do not leak information about secret data through timing side channels). It takes heavy inspiration from [subtle](https://github.com/dalek-cryptography/subtle) which itself is inspired by [rust-timing-shield](https://www.chosenplaintext.ca/open-source/rust-timing-shield/getting-started/). The goal of this project is to facilitate the writing performant constant time code. However, __this library is a complement, not a substitute, for verifying the generated assembly and empirical timing charictaristics of security-critical functions__.
+`cnti` is a low-level `no-std` library that provides abstractions for writing '__`c__onsta__n__t` __`ti__me`' programs (programs which do not leak information about secret data through timing side channels). It takes heavy inspiration from [subtle](https://github.com/dalek-cryptography/subtle) which itself is inspired by [rust-timing-shield](https://www.chosenplaintext.ca/open-source/rust-timing-shield/getting-started/). The goal of this project is to facilitate the writing performant constant time code. However, __this library is a complement, not a substitute, for verifying the generated assembly and empirical timing charictaristics of security-critical functions__.
 
 This library is still a work-in-progress. 
 
@@ -60,19 +60,7 @@ But we have to make the best of the world we live in while we are living in it. 
     
     The wording in this warning [used to be scarier](https://github.com/rust-lang/rust/pull/126703). Understandably, the Rust team does not want to make security guarantees which it is fundamentally impossible for them to make. However, this pushed people away from using `black_box` in favor of other tricks such as `core::ptr::read_volatile` and empty `core::arch::asm!` blocks. However, these make precisely the same formal gurantees that `black_box` makes (which is to say none). Per [these](https://rust-lang.zulipchat.com/#narrow/channel/122651-general/topic/black_box.20and.20crypto/with/349120959) [threads](https://rust-lang.zulipchat.com/#narrow/channel/146212-t-compiler.2Fconst-eval/topic/const.20ptr.3A.3Aread_volatile), `black_box` appears to be the least-worst option in terms of 'guarantees' (where 'guarantee' here means 'hope that we will not be smited by the LLVM gods for our huburis'). It also has the benefit of being permitted in `const` contexts.
 
-* Inline-assembly blocks to guarantee `cmov`/`csel` instructions where
-available. This crate makes use of the `cmov` crate, which provides guaranteed
-`cmov` and `csel` instructions on x86 and ARM respectively, while providing
-utilizing a bit-wise fallback on other platforms (note that no optimization
-barrier is employed by the `cmov` crate in those cases, but this is covered by
-`cnti`'s use of `black_box`). Note that while LLVM has explicit passes
-dedicated to (sometimes) replacing `cmov` instructions with branches, at
-present it leaves inline assembly blocks alone. This provides more efficient
-assembly for conditional assignment than an optimization barrier + bitwise ops
-does. In the future, I plan on adding some `asm!` blocks to ensure e.g.
-`cmp`+`setg` instructions are used for integer comparisons provided by the
-`cnti::CtOrd` trait as well.
-
+* Inline-assembly blocks to guarantee `cmov`/`csel` instructions where available. This crate makes use of the `cmov` crate, which provides guaranteed `cmov` and `csel` instructions on x86 and ARM respectively, while providing utilizing a bit-wise fallback on other platforms (note that no optimization barrier is employed by the `cmov` crate in those cases, but this is covered by `cnti`'s use of `black_box`). Note that while LLVM has explicit passes dedicated to (sometimes) replacing `cmov` instructions with branches, at present it leaves inline assembly blocks alone. This provides more efficient assembly for conditional assignment than an optimization barrier + bitwise ops does. In the future, I plan on adding some `asm!` blocks to ensure e.g. `cmp`+`setg` instructions are used for integer comparisons provided by the `cnti::CtOrd` trait as well.
 
 ## Comparisons with `subtle`
 
@@ -122,17 +110,9 @@ does. In the future, I plan on adding some `asm!` blocks to ensure e.g.
                 movzx eax, byte ptr [rsp - 1]
                 ret
         ```
-        Note that `cnti`'s assembly is not perfect either. The use of an
-        optimization barrier comes at the cost of an extra unnecessary store
-        and load of the comparison result from memory.
+        Note that `cnti`'s assembly is not perfect either. The use of an optimization barrier comes at the cost of an extra unnecessary store and load of the comparison result from memory.
 
-    * `subtle::ConditionallySelectable` has `Copy` as a super-trait, severely
-    restricting which types it can be implemented for. Meanwhile,
-    `cnti::CtSelect` requires only that implementors be `Sized`.
-    * While both traits are defined by a static `ct_select` method, `cnti` adds
-    methods to `CtBool` that permits doing selection via
-    `cond.if_true(&x).else_(&y)`. In my opinion, this makes it easier to
-    differentiate which branch is which compared to `T::conditional_select(&y, &x, cond)` (when writing this, I found myself accidentally reversing the order). 
+    * `subtle::ConditionallySelectable` has `Copy` as a super-trait, severely restricting which types it can be implemented for. Meanwhile, `cnti::CtSelect` requires only that implementors be `Sized`. * While both traits are defined by a static `ct_select` method, `cnti` adds methods to `CtBool` that permits doing selection via `cond.if_true(&x).else_(&y)`. In my opinion, this makes it easier to differentiate which branch is which compared to `T::conditional_select(&y, &x, cond)` (when writing this, I found myself accidentally reversing the order). 
 
 * `cnti::CtOrd` replaces `subtle::ConstantTimeGreater` + `subtle::ConstantTimeLess`:
     * The `subtle` implementation of a constant-time greater-than comparison is quite slow. Compare the `cnti` implementation of the greater-than operator for `u64`s to `subtle`s''. (Note: I would like to improve `cnti`'s implementation further to simply use `cmp`+`setg`)
@@ -203,10 +183,7 @@ does. In the future, I plan on adding some `asm!` blocks to ensure e.g.
             movzx eax, byte ptr [rsp - 1]
             ret
         ```
-    * `cnti`'s `CtOrd` trait is significantly more full featured than
-    `subtle::ConstantTimeGreater` + `subtle::ConstantTimeLess`. `cnti::CtOrd` includes (with default
-    implementations) `ct_leq`, `ct_geq` as well as `ct_min`,
-    `ct_max` and `ct_clamp` for types that also implement `CtSelect`.
+    * `cnti`'s `CtOrd` trait is significantly more full featured than `subtle::ConstantTimeGreater` + `subtle::ConstantTimeLess`. `cnti::CtOrd` includes (with default implementations) `ct_leq`, `ct_geq` as well as `ct_min`, `ct_max` and `ct_clamp` for types that also implement `CtSelect`.
     * `cnti` includes implementations of this trait for signed integers while `subtle` does not.
     * `CtOrd` provides a derive macro for structs:
         ```rust,ignore
@@ -261,8 +238,7 @@ does. In the future, I plan on adding some `asm!` blocks to ensure e.g.
 ### Benefits of subtle over this crate:
 * `subtle` is the state of the art, and battle tested. You should trust the people who wrote `subtle` to write correct stuff more than you trust me.
 * `subtle` supports  older versions of rust than this crate does. `subtle`
-supports versions of Rust as early as 1.41. This crate at least requires 1.59
-because of its dependency on the `cmov` crate.
+* `subtle` supports versions of Rust as early as 1.41. This crate at least requires 1.59 because of its dependency on the `cmov` crate.
 
 
 ## Performance

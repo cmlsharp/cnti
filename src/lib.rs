@@ -1,5 +1,5 @@
 #![doc = include_str!("../README.md")]
-//#![deny(warnings)]
+#![deny(warnings)]
 #![warn(clippy::pedantic, clippy::all)]
 #![warn(missing_docs)]
 #![no_std]
@@ -10,13 +10,22 @@ use core::ops::{
 
 use cmov::Cmov;
 
+#[cfg(feature = "derive")]
 pub use cnti_derive::{CtEq, CtOrd, CtSelect};
+
+#[expect(clippy::unused_unit)]
+#[cfg(feature = "derive")]
+mod _tuple {
+    use cnti_derive::tuple_impl;
+    tuple_impl!(0..12);
+}
 
 mod black_box;
 pub use black_box::BlackBox;
 
 mod option;
 pub use option::CtOption;
+mod int;
 
 /// The `CtBool` struct represents a boolean that is used for "branching" in branchless,
 /// constant-time programs
@@ -194,6 +203,7 @@ pub struct CtIf<'a, T, const IS_TRUE: bool> {
 impl<T, const IS_TRUE: bool> CtIf<'_, T, IS_TRUE> {
     /// Perform the `ct_select` by providing the alternative value
     #[must_use]
+    #[inline]
     pub fn else_(self, else_: &T) -> T
     where
         T: CtSelect,
