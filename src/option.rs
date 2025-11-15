@@ -29,10 +29,20 @@ use core::ops::{Deref, DerefMut};
 /// equivalent of [`Option::unwrap_or_else`](core::option::Option::unwrap_or_else) since the
 /// provided closure would need to be called regardless of whether the `CtOption` is conceptually
 /// `Some` or `None`, and hence this is identical to `ct_opt.unwrap_or(f())`.
-#[derive(Clone, Copy, Default, CtSelect)]
+#[derive(Clone, Copy, Default)]
 pub struct CtOption<T> {
     value: T,
     is_some: CtBool,
+}
+
+impl<T: CtSelect> CtSelect for CtOption<T> {
+    #[inline]
+    fn ct_select(choice: CtBool, then: &Self, else_: &Self) -> Self {
+        CtOption {
+            value: choice.if_true(&then.value).else_(&else_.value),
+            is_some: choice.if_true(&then.is_some).else_(&else_.is_some),
+        }
+    }
 }
 
 impl<T> core::fmt::Debug for CtOption<T> {

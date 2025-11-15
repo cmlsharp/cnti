@@ -53,9 +53,15 @@ mod int;
 /// c.ct_replace_if(a_equal_b, &0);
 ///
 /// ```
-#[derive(Copy, Clone, Default, CtSelect)]
+#[derive(Copy, Clone, Default)]
 #[repr(transparent)]
 pub struct CtBool(BlackBox<u8>);
+
+impl CtSelect for CtBool {
+    fn ct_select(cond: CtBool, then: &Self, else_: &Self) -> Self {
+        (cond & *then) | (!cond & *else_)
+    }
+}
 
 impl core::fmt::Debug for CtBool {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
