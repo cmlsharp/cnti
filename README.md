@@ -1,23 +1,31 @@
 # cnti
 
-`cnti` is a low-level `no-std` library that provides abstractions for writing '__`c__onsta__n__t` __`ti__me`' programs (programs which do not leak information about secret data through timing side channels). It takes heavy inspiration from [subtle](https://github.com/dalek-cryptography/subtle) which itself is inspired by [rust-timing-shield](https://www.chosenplaintext.ca/open-source/rust-timing-shield/getting-started/). The goal of this project is to facilitate the writing performant constant time code. However, __this library is a complement, not a substitute, for verifying the generated assembly and empirical timing charictaristics of security-critical functions__.
+`cnti` is a low-level `no-std` library that provides abstractions for writing '<b>c</b>onsta<b>n</b>t <b>ti</b>me`' programs (programs which do not leak information about secret data through timing side channels). It takes heavy inspiration from [subtle](https://github.com/dalek-cryptography/subtle) which itself is inspired by [rust-timing-shield](https://www.chosenplaintext.ca/open-source/rust-timing-shield/getting-started/). The goal of this project is to facilitate the writing performant constant time code. However, __this library is a complement, not a substitute, for verifying the generated assembly and empirical timing charictaristics of security-critical functions__.
 
 This library is still a work-in-progress. 
 
 ## Usage
 
 ```rust,no_run
-use cnti::{CtBool, CtEq, CtSelectExt};
+use cnti::{CtBool, CtEq, CtSelect, CtSelectExt};
+
+#[derive(CtSelect)]
+struct Elem {
+    // ...
+}
+
+struct Scalar {
+    // ...
+}
 
 
-// a**b (mod 2^32) where b is secret
-fn pow_secret(a: u32, b: u32) -> u32 {
-    let mut result = 1u32;
-    for i in 0..32 {
-        let bit = (b >> 1) & 1;
-        result.ct_replace_if(bit.ct_eq(&1), &result.wrapping_mul(a));
-        // eqvuialently: result = bit.ct_eq(&1).if_true(&result.wrapping_mul(a)).else_(&result);
-        a.wrapping_mul(a);
+fn pow_secret(a: Elem, b: Scalar) -> Elem {
+    let mut result = Elem::one();
+    for i in 0..Scalar::BIT_WIDTH {
+        let bit = b.get_bit(i);
+        result.ct_replace_if(bit.ct_eq(&1), &result.mul(a));
+        // eqvuialently: result = bit.ct_eq(&1).if_true(&result.mul(a)).else_(&result);
+        a *= a;
     }
     result
 }

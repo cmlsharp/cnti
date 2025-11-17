@@ -58,6 +58,7 @@ mod int;
 pub struct CtBool(BlackBox<u8>);
 
 impl CtSelect for CtBool {
+    #[inline]
     fn ct_select(cond: CtBool, then: &Self, else_: &Self) -> Self {
         (cond & *then) | (!cond & *else_)
     }
@@ -535,6 +536,35 @@ impl_int!(u64, i64);
 impl_int!(u128, i128);
 impl_int_no_select!(usize, isize);
 
+/// Helper methods for performing constant-time operations on Iterators
+/// Note that while these methods are implemented for all `ExactSizeIterator`s,
+/// these functions will only be constant time if the underlying iterator methods are.
+pub trait CtIterator: ExactSizeIterator {
+    /// Tests if every element of the iterator matches a predicate
+    /// This will not short circuit, but otherwise whether this is constant time depends on whether
+    /// the closure it is passed and the iterator implementation is.
+    #[inline]
+    fn ct_all<F: FnMut(Self::Item) -> CtBool>(self, mut f: F) -> CtBool
+    where
+        Self: Sized,
+    {
+        self.fold(CtBool::TRUE, |acc, item| acc & f(item))
+    }
+
+    /// Tests if any element in the iterator matches a predicate
+    /// This will not short circuit, but otherwise whether this is constant time depends on whether
+    /// the closure it is passed and the iterator implementation is.
+    #[inline]
+    fn ct_any<F: FnMut(Self::Item) -> CtBool>(self, mut f: F) -> CtBool
+    where
+        Self: Sized,
+    {
+        self.fold(CtBool::FALSE, |acc, item| acc & f(item))
+    }
+}
+
+impl<I: ExactSizeIterator> CtIterator for I {}
+
 // these annoyingly don't have implementations in the cmov crate, pending that we just cast them to
 // the right width type depending on target_pointer_width. I guess I don't have a case for 16-bit
 // platforms. lol
@@ -898,7 +928,7 @@ impl<T: CtEq> CtEq for PublicLenSlice<T> {
             return CtBool::FALSE;
         }
 
-        util::ct_zip_all(self, rhs, CtEq::ct_eq)
+        self.iter().zip(rhs.iter()).ct_all(|(l, r)| l.ct_eq(r))
     }
 }
 
