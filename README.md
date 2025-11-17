@@ -1,6 +1,6 @@
 # cnti
 
-`cnti` is a low-level `no-std` library that provides abstractions for writing '<b>c</b>onsta<b>n</b>t <b>ti</b>me`' programs (programs which do not leak information about secret data through timing side channels). It takes heavy inspiration from [subtle](https://github.com/dalek-cryptography/subtle) which itself is inspired by [rust-timing-shield](https://www.chosenplaintext.ca/open-source/rust-timing-shield/getting-started/). The goal of this project is to facilitate the writing performant constant time code. However, __this library is a complement, not a substitute, for verifying the generated assembly and empirical timing charictaristics of security-critical functions__.
+`cnti` is a low-level `no-std` library that provides abstractions for writing '<b>c</b>o<b>n</b>stant <b>ti</b>me`' programs (programs which do not leak information about secret data through timing side channels). It takes heavy inspiration from [subtle](https://github.com/dalek-cryptography/subtle) which itself is inspired by [rust-timing-shield](https://www.chosenplaintext.ca/open-source/rust-timing-shield/getting-started/). The goal of this project is to facilitate the writing performant constant time code. However, __this library is a complement, not a substitute, for verifying the generated assembly and empirical timing charictaristics of security-critical functions__.
 
 This library is still a work-in-progress. 
 
