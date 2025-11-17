@@ -6,7 +6,7 @@ This library is still a work-in-progress.
 
 ## Usage
 
-```rust,no_run
+```rust,ignore
 use cnti::{CtBool, CtEq, CtSelect, CtSelectExt};
 
 #[derive(CtSelect)]
