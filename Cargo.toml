@@ -23,5 +23,5 @@ quickcheck_macros = "1.1.0"
 subtle = "2.6.1"
 
 [[bench]]
-name = "gt" # the name of the benchmark file's name
+name = "bench" # the name of the benchmark file's name
 harness = false
